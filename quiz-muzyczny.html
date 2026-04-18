@@ -21,7 +21,7 @@
 		}
 
 		.app-layout {
-			width: min(1620px, 98vw);
+			width: min(1640px, 98vw);
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) 340px;
 			gap: 24px;
@@ -83,29 +83,6 @@
 			font-size: 15px;
 		}
 
-		.track-list {
-			max-height: 220px;
-			overflow: auto;
-			border: 1px solid #374151;
-			border-radius: 10px;
-		}
-
-		.track-item {
-			width: 100%;
-			border: 0;
-			border-bottom: 1px solid #1f2937;
-			border-radius: 0;
-			text-align: left;
-			background: transparent;
-			padding: 10px;
-			color: #e5e7eb;
-			cursor: pointer;
-		}
-
-		.track-item:last-child {
-			border-bottom: 0;
-		}
-
 		button {
 			border: 0;
 			border-radius: 12px;
@@ -134,12 +111,38 @@
 			cursor: not-allowed;
 		}
 
-		.clip-actions,
+		.track-list {
+			max-height: 220px;
+			overflow: auto;
+			border: 1px solid #374151;
+			border-radius: 10px;
+		}
+
+		.track-item {
+			width: 100%;
+			border: 0;
+			border-bottom: 1px solid #1f2937;
+			border-radius: 0;
+			text-align: left;
+			background: transparent;
+			padding: 10px;
+			color: #e5e7eb;
+			cursor: pointer;
+		}
+
+		.track-item:last-child {
+			border-bottom: 0;
+		}
+
+		.phase-actions,
 		.score-actions,
 		.bottom-actions {
 			display: grid;
-			grid-template-columns: repeat(3, 1fr);
 			gap: 8px;
+		}
+
+		.phase-actions {
+			grid-template-columns: repeat(4, 1fr);
 		}
 
 		.score-actions {
@@ -191,12 +194,19 @@
 			background: #172554;
 		}
 
+		.score-row.guessed-row {
+			background: #14532d;
+		}
+
 		@media (max-width: 960px) {
 			.app-layout {
 				grid-template-columns: 1fr;
 			}
 			.score-panel {
 				position: static;
+			}
+			.phase-actions {
+				grid-template-columns: 1fr 1fr;
 			}
 		}
 	</style>
@@ -205,7 +215,7 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Admin sobik wybiera utwor i puszcza fragment 1/3/5 sekund.</p>
+			<p class="info">Fazy: 1s -> 3s -> 8s -> 16s. Tylko sobik steruje rundą i punktami.</p>
 			<p class="me" id="meInfo"></p>
 
 			<div id="adminQuizSection" class="section hidden">
@@ -213,12 +223,14 @@
 					<input id="searchInput" type="text" placeholder="Szukaj utworu w Deezer" />
 					<button id="searchBtn" class="main">Szukaj</button>
 				</div>
+				<button id="loadPolishBtn">Wczytaj polski hiphop</button>
 				<div id="trackList" class="track-list"></div>
 				<p id="selectedTrackLabel" class="quiz-state">Wybrany utwor: brak</p>
-				<div class="clip-actions">
-					<button id="clip1Btn">1s</button>
-					<button id="clip3Btn">3s</button>
-					<button id="clip5Btn">5s</button>
+				<div class="phase-actions">
+					<button id="startRoundBtn">Start 1s</button>
+					<button id="nextPhaseBtn">Nastepna faza</button>
+					<button id="autoToggleBtn">Auto: ON</button>
+					<button id="stopClipBtn">Stop klipu</button>
 				</div>
 			</div>
 
@@ -232,6 +244,7 @@
 			</div>
 
 			<button id="buzzerBtn" class="main" style="font-size:40px;padding:26px 10px;">KLIK</button>
+			<button id="guessBtn" class="main">Zgadlem</button>
 			<p id="result" class="result">Czekam na pierwszy klik...</p>
 
 			<div id="adminScoreSection" class="score-actions hidden">
@@ -258,20 +271,24 @@
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 		const VIDEO_CONTROLLER_NAME = "sobik";
 		const MAX_PLAYERS = 8;
+		const AUTO_PHASE_DELAY_MS = 700;
 		const meInfo = document.getElementById("meInfo");
 		const adminQuizSection = document.getElementById("adminQuizSection");
 		const adminScoreSection = document.getElementById("adminScoreSection");
 		const searchInput = document.getElementById("searchInput");
 		const searchBtn = document.getElementById("searchBtn");
+		const loadPolishBtn = document.getElementById("loadPolishBtn");
 		const trackList = document.getElementById("trackList");
 		const selectedTrackLabel = document.getElementById("selectedTrackLabel");
-		const clip1Btn = document.getElementById("clip1Btn");
-		const clip3Btn = document.getElementById("clip3Btn");
-		const clip5Btn = document.getElementById("clip5Btn");
+		const startRoundBtn = document.getElementById("startRoundBtn");
+		const nextPhaseBtn = document.getElementById("nextPhaseBtn");
+		const autoToggleBtn = document.getElementById("autoToggleBtn");
+		const stopClipBtn = document.getElementById("stopClipBtn");
 		const volumeRange = document.getElementById("volumeRange");
 		const volumeLabel = document.getElementById("volumeLabel");
 		const quizPlaybackInfo = document.getElementById("quizPlaybackInfo");
 		const buzzerBtn = document.getElementById("buzzerBtn");
+		const guessBtn = document.getElementById("guessBtn");
 		const result = document.getElementById("result");
 		const goodBtn = document.getElementById("goodBtn");
 		const badBtn = document.getElementById("badBtn");
@@ -288,10 +305,12 @@
 		let pollTimer = null;
 		let currentScores = {};
 		let currentPlayerNames = {};
-		let selectedTrack = null;
+		let currentGuessed = {};
 		let localVolume = 100;
 		let lastQuizCommandToken = 0;
 		let clipStopTimer = null;
+		let autoAdvanceEnabled = true;
+		let autoAdvanceTimer = null;
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
 		function isValidPlayer(player) { return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS; }
@@ -313,6 +332,11 @@
 		function updateAdminUi() {
 			adminQuizSection.classList.toggle("hidden", !isAdmin());
 			adminScoreSection.classList.toggle("hidden", !isAdmin());
+			autoToggleBtn.textContent = autoAdvanceEnabled ? "Auto: ON" : "Auto: OFF";
+		}
+
+		function isPlayerGuessed(player) {
+			return Boolean(currentGuessed[String(player)]);
 		}
 
 		function renderScoreboard() {
@@ -321,7 +345,13 @@
 				const key = String(i);
 				const label = currentPlayerNames[key] ? String(currentPlayerNames[key]) : "Gracz " + i;
 				const score = toIntScore(currentScores[key]);
-				const rowClass = i === myPlayer ? "score-row me-row" : "score-row";
+				let rowClass = "score-row";
+				if (i === myPlayer) {
+					rowClass = rowClass + " me-row";
+				}
+				if (isPlayerGuessed(i)) {
+					rowClass = rowClass + " guessed-row";
+				}
 				rows.push('<div class="' + rowClass + '"><span>' + label + ' (P' + i + ')</span><span>' + score + "</span></div>");
 			}
 			scoreboard.innerHTML = rows.join("");
@@ -366,6 +396,9 @@
 			if (!previewUrl || durationSec <= 0) {
 				return;
 			}
+			if (isPlayerGuessed(myPlayer)) {
+				return;
+			}
 			stopCurrentClip();
 			if (quizAudio.src !== previewUrl) {
 				quizAudio.src = previewUrl;
@@ -382,10 +415,59 @@
 			}
 		}
 
+		function clearAutoAdvanceTimer() {
+			if (!autoAdvanceTimer) {
+				return;
+			}
+			clearTimeout(autoAdvanceTimer);
+			autoAdvanceTimer = null;
+		}
+
+		async function requestNextPhase() {
+			if (!isAdmin()) {
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-next-phase", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name: myName })
+				});
+				updateByState(data.state);
+			} catch (err) {
+				return;
+			}
+		}
+
+		function scheduleAutoAdvanceIfNeeded(state) {
+			clearAutoAdvanceTimer();
+			if (!isAdmin() || !autoAdvanceEnabled) {
+				return;
+			}
+			const roundActive = Boolean(state.quizRoundActive);
+			const guessedCount = Number(state.quizGuessedCount || 0);
+			const occupiedCount = Number(state.quizOccupiedCount || 0);
+			const phaseIndex = Number(state.quizPhaseIndex || -1);
+			const durations = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [1, 3, 8, 16];
+			const maxIndex = durations.length - 1;
+			if (!roundActive || phaseIndex < 0 || phaseIndex >= maxIndex) {
+				return;
+			}
+			if (occupiedCount > 0 && guessedCount >= occupiedCount) {
+				return;
+			}
+			const currentDuration = Number(state.quizCommandDurationSec || 0);
+			const delay = Math.max(400, currentDuration * 1000 + AUTO_PHASE_DELAY_MS);
+			autoAdvanceTimer = setTimeout(() => {
+				requestNextPhase();
+			}, delay);
+		}
+
 		function updateByState(state) {
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			currentGuessed = state.quizGuessedPlayers || {};
 			const winner = state.winner;
 			const winnerName = state.winnerName || ("Gracz " + winner);
 			const winnerTime = state.winnerTimeMs;
@@ -396,14 +478,22 @@
 				result.textContent = winnerName + " kliknal(a) pierwszy! Czas: " + winnerTime + " ms";
 				buzzerBtn.disabled = true;
 			}
+			guessBtn.disabled = isPlayerGuessed(myPlayer) || !Boolean(state.quizRoundActive);
 			const selectedLabel = String(state.quizTrackLabel || "").trim();
 			selectedTrackLabel.textContent = "Wybrany utwor: " + (selectedLabel || "brak");
-			quizPlaybackInfo.textContent = "Komenda klipu: " + (state.quizCommandDurationSec ? String(state.quizCommandDurationSec) + "s" : "brak");
+			const phaseIndex = Number(state.quizPhaseIndex || -1);
+			const phaseDuration = Number(state.quizCommandDurationSec || 0);
+			if (phaseIndex >= 0) {
+				quizPlaybackInfo.textContent = "Faza " + (phaseIndex + 1) + ": " + phaseDuration + "s";
+			} else {
+				quizPlaybackInfo.textContent = "Czekam na komende odtworzenia fragmentu...";
+			}
 			const token = Number(state.quizCommandToken || 0);
 			if (token > lastQuizCommandToken) {
 				lastQuizCommandToken = token;
 				playQuizClipFromState(state);
 			}
+			scheduleAutoAdvanceIfNeeded(state);
 			updateAdminUi();
 			renderScoreboard();
 		}
@@ -433,6 +523,23 @@
 			} catch (err) {
 				buzzerBtn.disabled = false;
 				setStatus("blad klikniecia");
+			}
+		}
+
+		async function markGuess() {
+			if (!myPlayer || isPlayerGuessed(myPlayer)) {
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-guess", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ player: myPlayer, name: myName })
+				});
+				updateByState(data.state);
+				setStatus("zaznaczono zgadniecie");
+			} catch (err) {
+				setStatus("blad zaznaczenia zgadniecia");
 			}
 		}
 
@@ -479,7 +586,6 @@
 					const index = Number(btn.dataset.index);
 					const selected = items[index];
 					if (!selected) { return; }
-					selectedTrack = selected;
 					try {
 						const data = await fetchJson("/api/quiz-track", {
 							method: "POST",
@@ -513,18 +619,30 @@
 			}
 		}
 
-		async function playClip(durationSec) {
+		async function loadPolishHipHop() {
 			if (!isAdmin()) { return; }
 			try {
-				const data = await fetchJson("/api/quiz-play", {
+				const data = await fetchJson("/api/deezer-polish-hiphop?limit=30");
+				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+				renderTrackList(tracks);
+				setStatus("wczytano polski hiphop: " + tracks.length + " utworow");
+			} catch (err) {
+				setStatus("blad wczytywania polskiego hiphopu");
+			}
+		}
+
+		async function startQuizRound() {
+			if (!isAdmin()) { return; }
+			try {
+				const data = await fetchJson("/api/quiz-start-round", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ name: myName, durationSec: durationSec })
+					body: JSON.stringify({ name: myName })
 				});
 				updateByState(data.state);
-				setStatus("puszczono fragment " + durationSec + "s");
+				setStatus("start rundy 1s");
 			} catch (err) {
-				setStatus("blad puszczania fragmentu");
+				setStatus("blad startu rundy");
 			}
 		}
 
@@ -562,14 +680,25 @@
 				updateAdminUi();
 				startPolling();
 				refreshState();
+				if (isAdmin()) {
+					loadPolishHipHop();
+				}
 			}
 		}
 
 		searchBtn.addEventListener("click", searchTracks);
+		loadPolishBtn.addEventListener("click", loadPolishHipHop);
 		searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { searchTracks(); } });
-		clip1Btn.addEventListener("click", () => { playClip(1); });
-		clip3Btn.addEventListener("click", () => { playClip(3); });
-		clip5Btn.addEventListener("click", () => { playClip(5); });
+		startRoundBtn.addEventListener("click", startQuizRound);
+		nextPhaseBtn.addEventListener("click", requestNextPhase);
+		autoToggleBtn.addEventListener("click", () => {
+			autoAdvanceEnabled = !autoAdvanceEnabled;
+			updateAdminUi();
+			if (currentState) {
+				scheduleAutoAdvanceIfNeeded(currentState);
+			}
+		});
+		stopClipBtn.addEventListener("click", stopCurrentClip);
 		volumeRange.addEventListener("input", () => {
 			localVolume = clampVolume(volumeRange.value);
 			volumeRange.value = String(localVolume);
@@ -577,6 +706,7 @@
 			applyVolume();
 		});
 		buzzerBtn.addEventListener("click", clickBuzzer);
+		guessBtn.addEventListener("click", markGuess);
 		goodBtn.addEventListener("click", () => { updateScore(1); });
 		badBtn.addEventListener("click", () => { updateScore(-1); });
 		resetBtn.addEventListener("click", resetRound);

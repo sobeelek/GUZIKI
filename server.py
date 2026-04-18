@@ -4,6 +4,7 @@ except Exception:
 	cgi = None
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -18,6 +19,8 @@ ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
 MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
 VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
+DEEZER_POLISH_HIPHOP_QUERY = "polski hip hop"
+QUIZ_PHASE_DURATIONS = [1, 3, 8, 16]
 
 
 def _default_scores():
@@ -45,6 +48,9 @@ BUZZER_STATE = {
 	"quiz_command_token": 0,
 	"quiz_command_duration_sec": 0,
 	"quiz_command_issued_ms": 0,
+	"quiz_round_active": False,
+	"quiz_phase_index": -1,
+	"quiz_guessed_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
 	"last_update_ms": 0,
@@ -195,6 +201,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 		BUZZER_STATE["winner_name"] = ""
 		BUZZER_STATE["winner_time_ms"] = None
 		BUZZER_STATE["video_paused"] = False
+		BUZZER_STATE["quiz_round_active"] = False
+		BUZZER_STATE["quiz_phase_index"] = -1
 		BUZZER_STATE["quiz_command_duration_sec"] = 0
 		BUZZER_STATE["quiz_command_issued_ms"] = 0
 		BUZZER_STATE["last_update_ms"] = self._now_ms()
@@ -217,8 +225,64 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if key not in BUZZER_STATE["player_names"]:
 				BUZZER_STATE["player_names"][key] = "Gracz %d" % i
 
+	def _ensure_quiz_state(self):
+		guessed = BUZZER_STATE.get("quiz_guessed_players")
+		if not isinstance(guessed, dict):
+			BUZZER_STATE["quiz_guessed_players"] = {}
+			guessed = BUZZER_STATE["quiz_guessed_players"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in guessed:
+				guessed[key] = False
+
+	def _is_player_occupied(self, player):
+		key = str(player)
+		name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+		return not self._is_default_player_name(player, name)
+
+	def _count_guessed_players(self):
+		self._ensure_quiz_state()
+		total = 0
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if self._is_player_occupied(i) and bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
+				total = total + 1
+		return total
+
+	def _count_occupied_players(self):
+		self._ensure_scores_and_names()
+		total = 0
+		for i in range(1, MAX_PLAYERS + 1):
+			if self._is_player_occupied(i):
+				total = total + 1
+		return total
+
+	def _start_quiz_round(self):
+		self._ensure_quiz_state()
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			BUZZER_STATE["quiz_guessed_players"][key] = False
+		BUZZER_STATE["quiz_round_active"] = True
+		BUZZER_STATE["quiz_phase_index"] = 0
+		BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
+		BUZZER_STATE["quiz_command_duration_sec"] = QUIZ_PHASE_DURATIONS[0]
+		BUZZER_STATE["quiz_command_issued_ms"] = self._now_ms()
+
+	def _advance_quiz_phase(self):
+		self._ensure_quiz_state()
+		current_index = int(BUZZER_STATE.get("quiz_phase_index", -1))
+		next_index = current_index + 1
+		if next_index >= len(QUIZ_PHASE_DURATIONS):
+			return False
+		BUZZER_STATE["quiz_phase_index"] = next_index
+		BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
+		BUZZER_STATE["quiz_command_duration_sec"] = QUIZ_PHASE_DURATIONS[next_index]
+		BUZZER_STATE["quiz_command_issued_ms"] = self._now_ms()
+		return True
+
 	def _public_buzzer_state(self):
 		self._ensure_scores_and_names()
+		self._ensure_quiz_state()
 		return {
 			"roundId": BUZZER_STATE["round_id"],
 			"roundStartedMs": BUZZER_STATE["round_started_ms"],
@@ -233,6 +297,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizCommandToken": BUZZER_STATE["quiz_command_token"],
 			"quizCommandDurationSec": BUZZER_STATE["quiz_command_duration_sec"],
 			"quizCommandIssuedMs": BUZZER_STATE["quiz_command_issued_ms"],
+			"quizRoundActive": BUZZER_STATE["quiz_round_active"],
+			"quizPhaseIndex": BUZZER_STATE["quiz_phase_index"],
+			"quizPhaseDurations": QUIZ_PHASE_DURATIONS,
+			"quizGuessedPlayers": BUZZER_STATE["quiz_guessed_players"],
+			"quizGuessedCount": self._count_guessed_players(),
+			"quizOccupiedCount": self._count_occupied_players(),
 			"videoControllerName": VIDEO_CONTROLLER_NAME,
 			"scores": BUZZER_STATE["scores"],
 			"playerNames": BUZZER_STATE["player_names"],
@@ -250,6 +320,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/deezer-search":
 			self.handle_deezer_search_get(parsed.query)
+			return
+		if parsed.path == "/api/deezer-polish-hiphop":
+			self.handle_deezer_polish_hiphop_get(parsed.query)
 			return
 		super().do_GET()
 
@@ -290,6 +363,15 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/quiz-play":
 			self.handle_quiz_play_post()
+			return
+		if parsed.path == "/api/quiz-start-round":
+			self.handle_quiz_start_round_post()
+			return
+		if parsed.path == "/api/quiz-next-phase":
+			self.handle_quiz_next_phase_post()
+			return
+		if parsed.path == "/api/quiz-guess":
+			self.handle_quiz_guess_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -561,6 +643,47 @@ class AppHandler(SimpleHTTPRequestHandler):
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
+	def _get_limit_from_query(self, query_text, default_limit):
+		parsed_query = parse_qs(query_text or "")
+		limit_raw = str((parsed_query.get("limit") or [str(default_limit)])[0]).strip()
+		try:
+			limit = int(limit_raw)
+		except Exception:
+			limit = default_limit
+		if limit < 1:
+			limit = 1
+		if limit > 50:
+			limit = 50
+		return limit
+
+	def _fetch_deezer_tracks(self, term, limit):
+		url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": limit})
+		req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+		with urlopen(req, timeout=8) as response:
+			raw = response.read().decode("utf-8", errors="replace")
+		parsed = json.loads(raw)
+		items = parsed.get("data", [])
+		tracks = []
+		for item in items:
+			preview = str(item.get("preview") or "").strip()
+			if not preview:
+				continue
+			title = str(item.get("title") or "").strip()
+			artist_name = str((item.get("artist") or {}).get("name") or "").strip()
+			label = title
+			if artist_name:
+				label = title + " - " + artist_name
+			tracks.append(
+				{
+					"id": str(item.get("id") or ""),
+					"label": label[:120],
+					"previewUrl": preview,
+					"title": title[:80],
+					"artist": artist_name[:80],
+				}
+			)
+		return tracks
+
 	def handle_deezer_search_get(self, query_text):
 		try:
 			parsed_query = parse_qs(query_text or "")
@@ -568,47 +691,25 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not term:
 				self.json_response({"tracks": []}, 200)
 				return
-			limit_raw = str((parsed_query.get("limit") or ["15"])[0]).strip()
-			try:
-				limit = int(limit_raw)
-			except Exception:
-				limit = 15
-			if limit < 1:
-				limit = 1
-			if limit > 25:
-				limit = 25
-			url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": limit})
-			req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-			with urlopen(req, timeout=8) as response:
-				raw = response.read().decode("utf-8", errors="replace")
-			parsed = json.loads(raw)
-			items = parsed.get("data", [])
-			tracks = []
-			for item in items:
-				preview = str(item.get("preview") or "").strip()
-				if not preview:
-					continue
-				title = str(item.get("title") or "").strip()
-				artist_name = str((item.get("artist") or {}).get("name") or "").strip()
-				label = title
-				if artist_name:
-					label = title + " - " + artist_name
-				tracks.append(
-					{
-						"id": str(item.get("id") or ""),
-						"label": label[:120],
-						"previewUrl": preview,
-						"title": title[:80],
-						"artist": artist_name[:80],
-					}
-				)
+			limit = self._get_limit_from_query(query_text, 15)
+			tracks = self._fetch_deezer_tracks(term, limit)
 			self.json_response({"tracks": tracks}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_deezer_polish_hiphop_get(self, query_text):
+		try:
+			limit = self._get_limit_from_query(query_text, 30)
+			tracks = self._fetch_deezer_tracks(DEEZER_POLISH_HIPHOP_QUERY, max(limit * 2, 30))
+			random.shuffle(tracks)
+			self.json_response({"tracks": tracks[:limit]}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
 	def handle_quiz_track_post(self):
 		try:
 			self._ensure_round_started()
+			self._ensure_quiz_state()
 			length = int(self.headers.get("Content-Length", "0"))
 			raw = self.rfile.read(length)
 			parsed = json.loads(raw.decode("utf-8"))
@@ -626,6 +727,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			label = str(parsed.get("label", "")).strip()
 			BUZZER_STATE["quiz_preview_url"] = preview_url
 			BUZZER_STATE["quiz_track_label"] = label[:120]
+			BUZZER_STATE["quiz_round_active"] = False
+			BUZZER_STATE["quiz_phase_index"] = -1
 			BUZZER_STATE["quiz_command_duration_sec"] = 0
 			BUZZER_STATE["quiz_command_issued_ms"] = 0
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
@@ -659,6 +762,87 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_command_duration_sec"] = duration_sec
 			BUZZER_STATE["quiz_command_issued_ms"] = now_ms
 			BUZZER_STATE["last_update_ms"] = now_ms
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_start_round_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_quiz_state()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can start quiz round"}, 403)
+				return
+			if not str(BUZZER_STATE.get("quiz_preview_url", "")).strip():
+				self.json_response({"error": "No quiz track selected"}, 400)
+				return
+			# Najważniejsze: start rundy ustawia pierwszy etap (1s) i resetuje status zgadniecia dla wszystkich.
+			self._start_quiz_round()
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_next_phase_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_quiz_state()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can advance quiz phase"}, 403)
+				return
+			if not bool(BUZZER_STATE.get("quiz_round_active")):
+				self.json_response({"error": "Quiz round is not active"}, 400)
+				return
+			if not self._advance_quiz_phase():
+				self.json_response({"error": "Already at last phase"}, 400)
+				return
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_guess_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_quiz_state()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			player = self._sanitize_player(parsed.get("player"))
+			if player is None:
+				self.json_response({"error": "Invalid player number"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
+			key = str(player)
+			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+			if not self._same_name(current_name, name):
+				self.json_response({"error": "Player identity mismatch"}, 403)
+				return
+			if not bool(BUZZER_STATE.get("quiz_round_active")):
+				self.json_response({"error": "Quiz round is not active"}, 400)
+				return
+			BUZZER_STATE["quiz_guessed_players"][key] = True
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
