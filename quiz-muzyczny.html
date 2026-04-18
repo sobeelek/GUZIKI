@@ -140,6 +140,37 @@
 			margin: 0;
 		}
 
+		.result.bad {
+			color: #f87171;
+		}
+
+		.wrong-guess-panel {
+			margin: 10px 0 0;
+			padding: 12px 14px;
+			border-radius: 12px;
+			border: 2px solid #dc2626;
+			background: #450a0a;
+			color: #fecaca;
+			font-size: 15px;
+			line-height: 1.45;
+		}
+
+		.wrong-guess-panel strong {
+			display: block;
+			margin-bottom: 8px;
+			color: #fecaca;
+		}
+
+		.wrong-guess-panel ul {
+			margin: 0;
+			padding-left: 1.2em;
+		}
+
+		.wrong-guess-panel li {
+			margin: 4px 0;
+			word-break: break-word;
+		}
+
 		.status,
 		.quiz-state {
 			margin: 0;
@@ -208,6 +239,10 @@
 
 		.score-row.artist-hint-row {
 			background: #713f12;
+		}
+
+		.score-row.wrong-row {
+			background: #450a0a;
 		}
 
 		.guess-autocomplete-wrap {
@@ -289,7 +324,7 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Zasada: 1s, potem 3s, 8s, 16s fragmentu od poczatku preview Deezer. Podpowiedz: wpisz fragment — wyskakuja propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta biezacego utworu. Na koncu ~10s z srodka + podpis.</p>
+			<p class="info">Zasada: jedna runda 16 s fragmentu od poczatku preview Deezer. Zla odpowiedz (bez trafienia artysty) = koniec zgadywania w tej piosence, lista prob na czerwono. Podpowiedz: wpisz fragment — propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta — dopisz tytul. Po rundzie lub gdy wszyscy trafia: ujawnienie ~10 s ze srodka + podpis, potem Gotowy i nastepna piosenka.</p>
 			<p class="me" id="meInfo"></p>
 			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
@@ -326,7 +361,8 @@
 				</div>
 				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
 			</div>
-			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na kolejna fase.</p>
+			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na koniec 16 s.</p>
+			<div id="wrongGuessPanel" class="wrong-guess-panel hidden" aria-live="polite"></div>
 
 			<div class="bottom-actions">
 				<button id="resetBtn">Reset rundy</button>
@@ -369,6 +405,7 @@
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const readyBtn = document.getElementById("readyBtn");
 		const result = document.getElementById("result");
+		const wrongGuessPanel = document.getElementById("wrongGuessPanel");
 		const resetBtn = document.getElementById("resetBtn");
 		const changeBtn = document.getElementById("changeBtn");
 		const statusEl = document.getElementById("status");
@@ -392,6 +429,8 @@
 		let autoAdvanceTimer = null;
 		let myReady = false;
 		let currentArtistHints = {};
+		let currentQuizWrong = {};
+		let currentQuizWrongGuesses = {};
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
 
@@ -499,6 +538,10 @@
 			return Boolean(currentArtistHints[String(player)]);
 		}
 
+		function isQuizWrong(player) {
+			return Boolean(currentQuizWrong[String(player)]);
+		}
+
 		function escapeHtml(text) {
 			const s = String(text || "");
 			return s
@@ -526,6 +569,7 @@
 		}
 
 		function renderScoreboard() {
+			const roundOn = currentState && Boolean(currentState.quizRoundActive);
 			const rows = [];
 			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
 				const key = String(i);
@@ -537,6 +581,8 @@
 				}
 				if (isPlayerGuessed(i)) {
 					rowClass = rowClass + " guessed-row";
+				} else if (roundOn && isQuizWrong(i)) {
+					rowClass = rowClass + " wrong-row";
 				} else if (isArtistHint(i)) {
 					rowClass = rowClass + " artist-hint-row";
 				}
@@ -763,6 +809,8 @@
 			lastStateUpdateMs = Number(state.lastUpdateMs || 0);
 			currentGuessed = state.quizGuessedPlayers || {};
 			currentArtistHints = state.quizArtistHintPlayers || {};
+			currentQuizWrong = state.quizWrongPlayers || {};
+			currentQuizWrongGuesses = state.quizWrongGuesses || {};
 			const readyPlayers = state.quizReadyPlayers || {};
 			myReady = Boolean(readyPlayers[String(myPlayer)]);
 			const revealOn = Boolean(state.quizRevealActive);
@@ -786,19 +834,42 @@
 				revealPanel.classList.add("hidden");
 			}
 			const roundOn = Boolean(state.quizRoundActive);
-			guessSubmitBtn.disabled = isPlayerGuessed(myPlayer) || !roundOn || revealOn;
+			const myWrong = isQuizWrong(myPlayer);
+			const myWrongList = Array.isArray(currentQuizWrongGuesses[String(myPlayer)])
+				? currentQuizWrongGuesses[String(myPlayer)]
+				: [];
+			guessSubmitBtn.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
 			guessInput.disabled = guessSubmitBtn.disabled;
-			if (!roundOn && !revealOn) {
-				result.textContent = "Ustaw typ (sobik), potem Gotowy — startuje losowa piosenka.";
-			} else if (roundOn) {
-				result.textContent = isPlayerGuessed(myPlayer) ? "Zgadles — czekasz na ujawnienie." : "Sluchaj i wpisz artyste oraz tytul.";
-			} else if (revealOn) {
-				result.textContent = "Faza ujawnienia — sluchaj ~10s fragmentu ze srodka.";
+			if (myWrong && roundOn) {
+				wrongGuessPanel.classList.remove("hidden");
+				let items = "";
+				for (let wi = 0; wi < myWrongList.length; wi = wi + 1) {
+					items = items + "<li>" + escapeHtml(String(myWrongList[wi])) + "</li>";
+				}
+				wrongGuessPanel.innerHTML =
+					"<strong>Zle — nie mozesz juz zgadywac w tej piosence. Czekaj na nastepna.</strong><ul>" +
+					items +
+					"</ul>";
+				result.textContent = "Bledna odpowiedz — koniec prob w tej rundzie.";
+				result.classList.add("bad");
+			} else {
+				wrongGuessPanel.classList.add("hidden");
+				wrongGuessPanel.innerHTML = "";
+				result.classList.remove("bad");
+				if (!roundOn && !revealOn) {
+					result.textContent = "Ustaw typ (sobik), potem Gotowy — startuje losowa piosenka.";
+				} else if (roundOn) {
+					result.textContent = isPlayerGuessed(myPlayer)
+						? "Zgadles — czekasz na ujawnienie."
+						: "Sluchaj (16 s) i wpisz artyste oraz tytul.";
+				} else if (revealOn) {
+					result.textContent = "Faza ujawnienia — sluchaj ~10s fragmentu ze srodka.";
+				}
 			}
 			updateReadyUi();
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
 			const phaseDuration = Number(state.quizCommandDurationSec || 0);
-			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [5, 3, 2, 1];
+			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [3];
 			const readyCount = Number(state.quizReadyCount || 0);
 			const occupiedCount = Number(state.quizOccupiedCount || 0);
 			if (revealOn) {
@@ -846,6 +917,11 @@
 					body: JSON.stringify({ player: myPlayer, name: myName, guess: text })
 				});
 				updateByState(data.state);
+				if (data.guessWrong) {
+					guessInput.value = "";
+					setStatus("zle — nastepna proba przy nastepnej piosence");
+					return;
+				}
 				if (data.artistHintOnly) {
 					setStatus("Trafiony artysta — dopisz tytul (albo wybierz z listy)");
 				} else {
@@ -878,7 +954,7 @@
 					body: JSON.stringify({ name: myName })
 				});
 				updateByState(data.state);
-				setStatus("start rundy 1s");
+				setStatus("start rundy 16s");
 			} catch (err) {
 				setStatus("blad startu rundy");
 			}

@@ -23,8 +23,8 @@ MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
 VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
 DEEZER_POLISH_HIPHOP_QUERY = "polski hip hop"
-QUIZ_PHASE_DURATIONS = [1, 3, 8, 16]
-QUIZ_PHASE_POINTS = [5, 3, 2, 1]
+QUIZ_PHASE_DURATIONS = [16]
+QUIZ_PHASE_POINTS = [3]
 QUIZ_REVEAL_CLIP_SEC = 10
 
 
@@ -86,6 +86,8 @@ BUZZER_STATE = {
 	"quiz_phase_index": -1,
 	"quiz_guessed_players": {},
 	"quiz_artist_hint_players": {},
+	"quiz_wrong_players": {},
+	"quiz_wrong_guesses": {},
 	"quiz_ready_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
@@ -262,6 +264,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			# Najważniejsze: po resecie kolejna runda wymaga ponownego Gotowy (unikamy podwójnego autostartu).
 			BUZZER_STATE["quiz_ready_players"][str(i)] = False
 			BUZZER_STATE["quiz_artist_hint_players"][str(i)] = False
+			BUZZER_STATE["quiz_guessed_players"][str(i)] = False
+			BUZZER_STATE["quiz_wrong_players"][str(i)] = False
+			BUZZER_STATE["quiz_wrong_guesses"][str(i)] = []
 
 	def _ensure_round_started(self):
 		if BUZZER_STATE["round_started_ms"] == 0:
@@ -382,6 +387,20 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_track_title"] = ""
 		if "quiz_track_artist" not in BUZZER_STATE:
 			BUZZER_STATE["quiz_track_artist"] = ""
+		wrong = BUZZER_STATE.get("quiz_wrong_players")
+		if not isinstance(wrong, dict):
+			BUZZER_STATE["quiz_wrong_players"] = {}
+			wrong = BUZZER_STATE["quiz_wrong_players"]
+		wg = BUZZER_STATE.get("quiz_wrong_guesses")
+		if not isinstance(wg, dict):
+			BUZZER_STATE["quiz_wrong_guesses"] = {}
+			wg = BUZZER_STATE["quiz_wrong_guesses"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in wrong:
+				wrong[key] = False
+			if key not in wg or not isinstance(wg.get(key), list):
+				wg[key] = []
 
 	def _is_player_occupied(self, player):
 		key = str(player)
@@ -461,6 +480,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			key = str(i)
 			BUZZER_STATE["quiz_guessed_players"][key] = False
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			BUZZER_STATE["quiz_wrong_players"][key] = False
+			BUZZER_STATE["quiz_wrong_guesses"][key] = []
 		BUZZER_STATE["quiz_round_active"] = True
 		BUZZER_STATE["quiz_phase_index"] = 0
 		BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
@@ -622,6 +643,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizPhasePoints": QUIZ_PHASE_POINTS,
 			"quizGuessedPlayers": BUZZER_STATE["quiz_guessed_players"],
 			"quizArtistHintPlayers": BUZZER_STATE["quiz_artist_hint_players"],
+			"quizWrongPlayers": BUZZER_STATE["quiz_wrong_players"],
+			"quizWrongGuesses": BUZZER_STATE["quiz_wrong_guesses"],
 			"quizGuessedCount": self._count_guessed_players(),
 			"quizReadyPlayers": BUZZER_STATE["quiz_ready_players"],
 			"quizReadyCount": self._count_ready_players(),
@@ -944,6 +967,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_ready_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_guessed_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_artist_hint_players"][str(assigned_player)] = False
+			BUZZER_STATE["quiz_wrong_players"][str(assigned_player)] = False
+			BUZZER_STATE["quiz_wrong_guesses"][str(assigned_player)] = []
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response(
 				{
@@ -982,6 +1007,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_ready_players"][key] = False
 			BUZZER_STATE["quiz_guessed_players"][key] = False
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			BUZZER_STATE["quiz_wrong_players"][key] = False
+			BUZZER_STATE["quiz_wrong_guesses"][key] = []
 			self._delete_legacy_uploaded_avatar_file(key)
 			self._ensure_player_avatars()
 			BUZZER_STATE["player_avatars"][key] = ""
@@ -1068,32 +1095,138 @@ class AppHandler(SimpleHTTPRequestHandler):
 			limit = 50
 		return limit
 
-	def _fetch_deezer_tracks(self, term, limit):
-		url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": limit})
+	def _fetch_deezer_url_json(self, url):
 		req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
 		with urlopen(req, timeout=8) as response:
 			raw = response.read().decode("utf-8", errors="replace")
-		parsed = json.loads(raw)
+		return json.loads(raw)
+
+	def _deezer_track_to_suggest_dict(self, item):
+		preview = str(item.get("preview") or "").strip()
+		if not preview:
+			return None
+		title = str(item.get("title") or "").strip()
+		artist_name = str((item.get("artist") or {}).get("name") or "").strip()
+		label = title
+		if artist_name:
+			label = title + " - " + artist_name
+		return {
+			"id": str(item.get("id") or ""),
+			"label": label[:120],
+			"previewUrl": preview,
+			"title": title[:80],
+			"artist": artist_name[:80],
+		}
+
+	def _deezer_track_involves_artist_id(self, item, artist_id):
+		try:
+			want = int(artist_id)
+		except Exception:
+			return False
+		main = item.get("artist") or {}
+		try:
+			if int(main.get("id") or 0) == want:
+				return True
+		except Exception:
+			pass
+		for c in item.get("contributors") or []:
+			try:
+				if int(c.get("id") or 0) == want:
+					return True
+			except Exception:
+				continue
+		return False
+
+	def _deezer_artist_name_matches_query(self, query, artist_name):
+		q = _fold_text_answer(query)
+		a = _fold_text_answer(artist_name)
+		if not q or not a:
+			return False
+		if q == a:
+			return True
+		if a.startswith(q) or q.startswith(a):
+			return True
+		if " " not in q and q in a:
+			return True
+		return False
+
+	def _deezer_try_resolve_artist_id(self, term):
+		t = term.strip()
+		if not t or " - " in t:
+			return None
+		words = t.split()
+		if len(words) > 2:
+			return None
+		url = "https://api.deezer.com/search/artist?" + urlencode({"q": t, "limit": 8})
+		try:
+			parsed = self._fetch_deezer_url_json(url)
+		except Exception:
+			return None
+		data = parsed.get("data") or []
+		if not data:
+			return None
+		first = data[0]
+		name = str(first.get("name") or "").strip()
+		if not self._deezer_artist_name_matches_query(t, name):
+			return None
+		try:
+			return int(first.get("id") or 0)
+		except Exception:
+			return None
+
+	def _fetch_deezer_tracks_for_artist_id(self, artist_id, term, limit):
+		out = []
+		seen = set()
+		try:
+			aid = int(artist_id)
+		except Exception:
+			return []
+
+		def push_item(item):
+			tid = str(item.get("id") or "").strip()
+			if not tid or tid in seen:
+				return
+			if not self._deezer_track_involves_artist_id(item, aid):
+				return
+			rec = self._deezer_track_to_suggest_dict(item)
+			if not rec:
+				return
+			seen.add(tid)
+			out.append(rec)
+
+		try:
+			top_url = "https://api.deezer.com/artist/%d/top?limit=50" % aid
+			top_parsed = self._fetch_deezer_url_json(top_url)
+			for item in top_parsed.get("data") or []:
+				push_item(item)
+				if len(out) >= limit:
+					return out[:limit]
+		except Exception:
+			pass
+		try:
+			st_lim = min(100, max(50, limit * 4))
+			search_url = "https://api.deezer.com/search/track?" + urlencode({"q": term, "limit": st_lim})
+			search_parsed = self._fetch_deezer_url_json(search_url)
+			for item in search_parsed.get("data") or []:
+				push_item(item)
+				if len(out) >= limit:
+					break
+		except Exception:
+			pass
+		return out[:limit]
+
+	def _fetch_deezer_tracks(self, term, limit):
+		url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": limit})
+		try:
+			parsed = self._fetch_deezer_url_json(url)
+		except Exception:
+			return []
 		items = parsed.get("data", [])
 		tracks = []
 		for item in items:
-			preview = str(item.get("preview") or "").strip()
-			if not preview:
-				continue
-			title = str(item.get("title") or "").strip()
-			artist_name = str((item.get("artist") or {}).get("name") or "").strip()
-			label = title
-			if artist_name:
-				label = title + " - " + artist_name
-			tracks.append(
-				{
-					"id": str(item.get("id") or ""),
-					"label": label[:120],
-					"previewUrl": preview,
-					"title": title[:80],
-					"artist": artist_name[:80],
-				}
-			)
+			rec = self._deezer_track_to_suggest_dict(item)
+			if rec:
+				tracks.append(rec)
 		return tracks
 
 	def handle_deezer_search_get(self, query_text):
@@ -1104,6 +1237,13 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"tracks": []}, 200)
 				return
 			limit = self._get_limit_from_query(query_text, 15)
+			# Najważniejsze: sam artysta (np. „sobel”) → tylko jego utwory i featy (contributors na Deezer).
+			artist_id = self._deezer_try_resolve_artist_id(term)
+			if artist_id is not None:
+				tracks = self._fetch_deezer_tracks_for_artist_id(artist_id, term, limit)
+				if tracks:
+					self.json_response({"tracks": tracks}, 200)
+					return
 			tracks = self._fetch_deezer_tracks(term, limit)
 			self.json_response({"tracks": tracks}, 200)
 		except Exception as ex:
@@ -1327,6 +1467,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
 				self.json_response({"ok": True, "alreadyGuessed": True, "state": self._public_buzzer_state()}, 200)
 				return
+			if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
+				self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
+				return
 			guess = str(parsed.get("guess", "")).strip()
 			if len(guess) < 3:
 				self.json_response({"error": "Za krotka odpowiedz"}, 400)
@@ -1349,7 +1492,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
 				return
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
-			self.json_response({"error": "Nie trafione — sprobuj inaczej (np. artysta - tytul)"}, 400)
+			BUZZER_STATE["quiz_wrong_players"][key] = True
+			prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
+			if not isinstance(prev, list):
+				prev = []
+				BUZZER_STATE["quiz_wrong_guesses"][key] = prev
+			prev.append(guess[:200])
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "guessWrong": True, "state": self._public_buzzer_state()}, 200)
 			return
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
