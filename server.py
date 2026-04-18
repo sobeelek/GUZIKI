@@ -14,6 +14,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
+MAX_PLAYERS = 8
 
 BUZZER_STATE = {
 	"round_id": 1,
@@ -21,6 +22,8 @@ BUZZER_STATE = {
 	"winner": None,
 	"winner_name": "",
 	"winner_time_ms": None,
+	"video_url": "",
+	"video_paused": False,
 	"last_update_ms": 0,
 }
 
@@ -84,7 +87,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			player = int(value)
 		except Exception:
 			return None
-		if player < 1 or player > 3:
+		if player < 1 or player > MAX_PLAYERS:
 			return None
 		return player
 
@@ -102,6 +105,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		BUZZER_STATE["winner"] = None
 		BUZZER_STATE["winner_name"] = ""
 		BUZZER_STATE["winner_time_ms"] = None
+		BUZZER_STATE["video_paused"] = False
 		BUZZER_STATE["last_update_ms"] = self._now_ms()
 
 	def _ensure_round_started(self):
@@ -115,6 +119,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"winner": BUZZER_STATE["winner"],
 			"winnerName": BUZZER_STATE["winner_name"],
 			"winnerTimeMs": BUZZER_STATE["winner_time_ms"],
+			"videoUrl": BUZZER_STATE["video_url"],
+			"videoPaused": BUZZER_STATE["video_paused"],
 			"lastUpdateMs": BUZZER_STATE["last_update_ms"],
 		}
 
@@ -142,6 +148,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-reset":
 			self.handle_buzzer_reset_post()
+			return
+		if parsed.path == "/api/buzzer-video":
+			self.handle_buzzer_video_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -223,6 +232,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["winner"] = player
 			BUZZER_STATE["winner_name"] = player_name
 			BUZZER_STATE["winner_time_ms"] = reaction_ms
+			BUZZER_STATE["video_paused"] = True
 			BUZZER_STATE["last_update_ms"] = now_ms
 
 			self.json_response(
@@ -239,6 +249,23 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def handle_buzzer_reset_post(self):
 		try:
 			self._new_round()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_video_post(self):
+		try:
+			self._ensure_round_started()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			video_url = str(parsed.get("videoUrl", "")).strip()
+			BUZZER_STATE["video_url"] = video_url
+			BUZZER_STATE["video_paused"] = False
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)

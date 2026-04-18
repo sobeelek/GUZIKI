@@ -142,6 +142,38 @@
 			font-size: 13px;
 			color: #9ca3af;
 		}
+
+		.video-controls {
+			display: grid;
+			grid-template-columns: 1fr auto;
+			gap: 8px;
+			align-items: center;
+		}
+
+		.video-wrap {
+			border-radius: 12px;
+			overflow: hidden;
+			background: #0b1220;
+			border: 1px solid #374151;
+			min-height: 220px;
+		}
+
+		.video-frame {
+			display: block;
+			width: 100%;
+			aspect-ratio: 16 / 9;
+			border: 0;
+		}
+
+		.video-empty {
+			min-height: 220px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: #9ca3af;
+			font-size: 14px;
+			padding: 12px;
+		}
 	</style>
 </head>
 <body>
@@ -156,6 +188,11 @@
 					<option value="1">Gracz 1</option>
 					<option value="2">Gracz 2</option>
 					<option value="3">Gracz 3</option>
+					<option value="4">Gracz 4</option>
+					<option value="5">Gracz 5</option>
+					<option value="6">Gracz 6</option>
+					<option value="7">Gracz 7</option>
+					<option value="8">Gracz 8</option>
 				</select>
 			</div>
 			<div class="field">
@@ -167,6 +204,13 @@
 
 		<div id="gameView" class="buzzer-area hidden">
 			<p class="me" id="meInfo"></p>
+			<div class="video-controls">
+				<input id="ytInput" type="text" placeholder="Wklej link YouTube (watch, youtu.be, shorts)" />
+				<button id="setVideoBtn">Ustaw film</button>
+			</div>
+			<div class="video-wrap" id="videoWrap">
+				<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+			</div>
 			<button id="buzzerBtn" class="big-buzzer">KLIK</button>
 			<p class="result" id="result">Czekam na pierwszy klik...</p>
 			<div class="actions">
@@ -180,6 +224,7 @@
 	<script>
 		// Najwazniejsze: domyslnie uzywamy tego samego hosta co strona, a recznie mozna nadpisac window.API_BASE_URL.
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
+		const MAX_PLAYERS = 8;
 
 		const setupView = document.getElementById("setupView");
 		const gameView = document.getElementById("gameView");
@@ -192,11 +237,16 @@
 		const resetBtn = document.getElementById("resetBtn");
 		const changeBtn = document.getElementById("changeBtn");
 		const statusEl = document.getElementById("status");
+		const ytInput = document.getElementById("ytInput");
+		const setVideoBtn = document.getElementById("setVideoBtn");
+		const videoWrap = document.getElementById("videoWrap");
 
 		let myPlayer = null;
 		let myName = "";
 		let currentState = null;
 		let pollTimer = null;
+		let currentVideoUrl = "";
+		let isVideoPaused = false;
 
 		function getStorageKey(prefix) {
 			return "buzzer_" + prefix;
@@ -210,6 +260,10 @@
 			return "Gracz " + player;
 		}
 
+		function isValidPlayer(player) {
+			return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS;
+		}
+
 		function buildApiUrl(path) {
 			const base = String(API_BASE_URL || "").replace(/\/+$/, "");
 			return base + path;
@@ -217,6 +271,77 @@
 
 		function setStatus(text) {
 			statusEl.textContent = "Status: " + text;
+		}
+
+		function extractYouTubeId(urlValue) {
+			const text = String(urlValue || "").trim();
+			if (!text) {
+				return "";
+			}
+			try {
+				const url = new URL(text);
+				const host = (url.hostname || "").toLowerCase();
+				if (host === "youtu.be") {
+					return (url.pathname || "").replace("/", "").slice(0, 20);
+				}
+				if (host.indexOf("youtube.com") !== -1 || host.indexOf("youtube-nocookie.com") !== -1) {
+					const v = url.searchParams.get("v");
+					if (v) {
+						return v.slice(0, 20);
+					}
+					const path = (url.pathname || "").split("/").filter(Boolean);
+					if (path.length >= 2 && (path[0] === "embed" || path[0] === "shorts" || path[0] === "live")) {
+						return path[1].slice(0, 20);
+					}
+				}
+			} catch (err) {
+				return "";
+			}
+			return "";
+		}
+
+		function buildEmbedUrl(videoId) {
+			return "https://www.youtube.com/embed/" + videoId + "?enablejsapi=1&autoplay=1&rel=0&playsinline=1";
+		}
+
+		function sendVideoCommand(commandName) {
+			const frame = document.getElementById("ytFrame");
+			if (!frame || !frame.contentWindow) {
+				return;
+			}
+			frame.contentWindow.postMessage(
+				JSON.stringify({
+					event: "command",
+					func: commandName,
+					args: []
+				}),
+				"*"
+			);
+		}
+
+		function renderVideo(urlValue) {
+			const text = String(urlValue || "").trim();
+			const videoId = extractYouTubeId(text);
+			currentVideoUrl = text;
+			if (!videoId) {
+				videoWrap.innerHTML = '<div class="video-empty">Brak filmu - wklej link YouTube.</div>';
+				return;
+			}
+			const embedUrl = buildEmbedUrl(videoId);
+			videoWrap.innerHTML = '<iframe id="ytFrame" class="video-frame" src="' + embedUrl + '" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+		}
+
+		function syncVideoPause(pausedValue) {
+			const paused = Boolean(pausedValue);
+			if (paused === isVideoPaused) {
+				return;
+			}
+			isVideoPaused = paused;
+			if (paused) {
+				sendVideoCommand("pauseVideo");
+				return;
+			}
+			sendVideoCommand("playVideo");
 		}
 
 		function setJoinedUi(isJoined) {
@@ -232,7 +357,8 @@
 		function restoreIdentity() {
 			const storedPlayer = localStorage.getItem(getStorageKey("player"));
 			const storedName = localStorage.getItem(getStorageKey("name"));
-			if (storedPlayer === "1" || storedPlayer === "2" || storedPlayer === "3") {
+			const storedPlayerNumber = Number(storedPlayer);
+			if (isValidPlayer(storedPlayerNumber)) {
 				playerSelect.value = storedPlayer;
 			}
 			if (storedName) {
@@ -246,6 +372,10 @@
 			const winnerName = state.winnerName || ("Gracz " + winner);
 			const winnerTime = state.winnerTimeMs;
 			buzzerBtn.classList.remove("winner");
+			if ((state.videoUrl || "") !== currentVideoUrl) {
+				renderVideo(state.videoUrl || "");
+			}
+			syncVideoPause(state.videoPaused);
 
 			if (winner === null) {
 				result.textContent = "Czekam na pierwszy klik...";
@@ -318,6 +448,36 @@
 			}
 		}
 
+		async function setVideo() {
+			const rawUrl = ytInput.value.trim();
+			if (!rawUrl) {
+				setStatus("wklej najpierw link YouTube");
+				return;
+			}
+			if (!extractYouTubeId(rawUrl)) {
+				setStatus("niepoprawny link YouTube");
+				return;
+			}
+			setVideoBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/buzzer-video", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						videoUrl: rawUrl
+					})
+				});
+				updateByState(data.state);
+				setStatus("film ustawiony");
+			} catch (err) {
+				setStatus("blad ustawiania filmu");
+			} finally {
+				setVideoBtn.disabled = false;
+			}
+		}
+
 		function startPolling() {
 			if (pollTimer) {
 				clearInterval(pollTimer);
@@ -328,7 +488,7 @@
 		function joinGame() {
 			const playerValue = playerSelect.value;
 			const player = Number(playerValue);
-			if (player !== 1 && player !== 2 && player !== 3) {
+			if (!isValidPlayer(player)) {
 				return;
 			}
 			myPlayer = player;
@@ -355,6 +515,12 @@
 		buzzerBtn.addEventListener("click", clickBuzzer);
 		resetBtn.addEventListener("click", resetRound);
 		changeBtn.addEventListener("click", leaveGame);
+		setVideoBtn.addEventListener("click", setVideo);
+		ytInput.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				setVideo();
+			}
+		});
 
 		restoreIdentity();
 		if (nickInput.value.trim().length === 0) {
