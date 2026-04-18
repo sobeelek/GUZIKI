@@ -20,13 +20,32 @@
 			color: #f9fafb;
 		}
 
+		.app-layout {
+			width: min(1500px, 96vw);
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 320px;
+			gap: 16px;
+			align-items: start;
+		}
+
 		.panel {
-			width: min(760px, 95vw);
+			width: 100%;
 			padding: 28px;
 			border-radius: 16px;
 			background: #1f2937;
 			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 			text-align: center;
+		}
+
+		.score-panel {
+			padding: 16px;
+			border-radius: 16px;
+			background: #1f2937;
+			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+			position: sticky;
+			top: 12px;
+			display: grid;
+			gap: 10px;
 		}
 
 		h1 {
@@ -107,23 +126,9 @@
 			gap: 14px;
 		}
 
-		.game-layout {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) 280px;
-			gap: 14px;
-			align-items: start;
-		}
-
 		.game-main {
 			display: grid;
 			gap: 14px;
-		}
-
-		.game-sidebar {
-			display: grid;
-			gap: 10px;
-			position: sticky;
-			top: 12px;
 		}
 
 		.big-buzzer {
@@ -190,7 +195,7 @@
 			overflow: hidden;
 			background: #0b1220;
 			border: 1px solid #374151;
-			min-height: 220px;
+			min-height: 360px;
 		}
 
 		.video-frame {
@@ -201,7 +206,7 @@
 		}
 
 		.video-empty {
-			min-height: 220px;
+			min-height: 360px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -273,58 +278,63 @@
 		}
 
 		@media (max-width: 960px) {
-			.game-layout {
+			.app-layout {
 				grid-template-columns: 1fr;
 			}
 
-			.game-sidebar {
+			.score-panel {
 				position: static;
+			}
+
+			.video-wrap,
+			.video-empty {
+				min-height: 220px;
 			}
 		}
 	</style>
 </head>
 <body>
+	<div class="app-layout">
 	<div class="panel">
 		<h1>Kto pierwszy, ten odpowiada</h1>
 		<p class="info">Kazdy widzi tylko swoj guzik, a klik jednego blokuje runde u wszystkich.</p>
 
 		<div id="gameView" class="buzzer-area">
-			<div class="game-layout">
-				<div class="game-main">
-					<p class="me" id="meInfo"></p>
-					<div id="videoControls" class="video-controls">
-						<input id="ytInput" type="text" placeholder="Wklej link YouTube (watch, youtu.be, shorts)" />
-						<button id="setVideoBtn">Ustaw film</button>
-					</div>
-					<div class="video-wrap" id="videoWrap">
-						<div id="videoStage">
-							<div class="video-empty">Brak filmu - wklej link YouTube.</div>
-						</div>
-						<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
-					</div>
-					<div class="volume-controls">
-						<span>Glosnosc</span>
-						<input id="volumeRange" type="range" min="0" max="100" step="1" value="100" />
-						<span id="volumeLabel">100%</span>
-					</div>
-					<div id="scoreControls" class="score-controls">
-						<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
-						<button id="badBtn" class="bad-btn">Zle (-1)</button>
-					</div>
-					<button id="buzzerBtn" class="big-buzzer">KLIK</button>
-					<p class="result" id="result">Czekam na pierwszy klik...</p>
-					<div class="actions">
-						<button id="resetBtn">Reset rundy</button>
-						<button id="changeBtn">Zmien gracza</button>
-					</div>
+			<div class="game-main">
+				<p class="me" id="meInfo"></p>
+				<div id="videoControls" class="video-controls">
+					<input id="ytInput" type="text" placeholder="Wklej link YouTube (watch, youtu.be, shorts)" />
+					<button id="setVideoBtn">Ustaw film</button>
 				</div>
-				<div class="game-sidebar">
-					<p class="my-score" id="myScore">Twoje punkty: 0</p>
-					<div id="scoreboard" class="scoreboard"></div>
+				<div class="video-wrap" id="videoWrap">
+					<div id="videoStage">
+						<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+					</div>
+					<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
+				</div>
+				<div class="volume-controls">
+					<span>Glosnosc</span>
+					<input id="volumeRange" type="range" min="0" max="100" step="1" value="100" />
+					<span id="volumeLabel">100%</span>
+				</div>
+				<div id="scoreControls" class="score-controls">
+					<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
+					<button id="badBtn" class="bad-btn">Zle (-1)</button>
+				</div>
+				<button id="buzzerBtn" class="big-buzzer">KLIK</button>
+				<p class="result" id="result">Czekam na pierwszy klik...</p>
+				<div class="actions">
+					<button id="resetBtn">Reset rundy</button>
+					<button id="changeBtn">Zmien gracza</button>
 				</div>
 			</div>
 			<p id="status" class="status">Status: laczenie...</p>
 		</div>
+	</div>
+	<aside class="score-panel">
+		<p class="my-score" id="myScore">Twoje punkty: 0</p>
+		<div id="scoreboard" class="scoreboard"></div>
+	</aside>
 	</div>
 
 	<script>
