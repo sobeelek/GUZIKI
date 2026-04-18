@@ -159,11 +159,39 @@
 
 		.score-row {
 			display: grid;
-			grid-template-columns: 1fr auto;
+			grid-template-columns: auto 1fr auto;
+			align-items: center;
 			padding: 8px 10px;
 			gap: 8px;
 			background: #0f172a;
 			border-bottom: 1px solid #1f2937;
+		}
+
+		.sb-ava {
+			width: 40px;
+			height: 40px;
+			border-radius: 50%;
+			overflow: hidden;
+			flex-shrink: 0;
+			background: #334155;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 14px;
+			font-weight: 800;
+			color: #e2e8f0;
+		}
+
+		.sb-avatar-img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			display: block;
+		}
+
+		.score-name-cell {
+			min-width: 0;
+			word-break: break-word;
 		}
 
 		.score-row:last-child {
@@ -176,6 +204,54 @@
 
 		.score-row.guessed-row {
 			background: #14532d;
+		}
+
+		.score-row.artist-hint-row {
+			background: #713f12;
+		}
+
+		.guess-autocomplete-wrap {
+			position: relative;
+			width: 100%;
+		}
+
+		.guess-suggest {
+			list-style: none;
+			margin: 0;
+			padding: 4px 0;
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: 100%;
+			z-index: 20;
+			max-height: 220px;
+			overflow: auto;
+			background: #0b1220;
+			border: 1px solid #4b5563;
+			border-radius: 10px;
+			box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+		}
+
+		.guess-suggest li {
+			margin: 0;
+			padding: 0;
+		}
+
+		.guess-suggest-item {
+			width: 100%;
+			border: 0;
+			border-radius: 0;
+			background: transparent;
+			text-align: left;
+			padding: 10px 12px;
+			font-size: 14px;
+			color: #e5e7eb;
+			cursor: pointer;
+			font-weight: 600;
+		}
+
+		.guess-suggest-item:hover {
+			background: #1f2937;
 		}
 
 		.guess-row {
@@ -213,7 +289,7 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Zasada: 1s, potem 3s, 8s, 16s fragmentu od poczatku preview Deezer. Zgadujesz wpisujac artyste i tytul (np. Pezet - Nie znam sie). Zielono = zgadles te piosenke. Na koncu ~10s fragment ze srodka preview + podpis. Sobik ustawia typ muzyki.</p>
+			<p class="info">Zasada: 1s, potem 3s, 8s, 16s fragmentu od poczatku preview Deezer. Podpowiedz: wpisz fragment — wyskakuja propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta biezacego utworu. Na koncu ~10s z srodka + podpis.</p>
 			<p class="me" id="meInfo"></p>
 			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
@@ -243,9 +319,12 @@
 			</div>
 
 			<button id="readyBtn">Gotowy: NIE</button>
-			<div class="guess-row">
-				<input id="guessInput" type="text" placeholder="Artysta - tytul piosenki" autocomplete="off" />
-				<button id="guessSubmitBtn" class="main">Sprawdz</button>
+			<div class="guess-autocomplete-wrap">
+				<div class="guess-row">
+					<input id="guessInput" type="text" placeholder="Artysta - tytul (podpowiedz z Deezer)" autocomplete="off" />
+					<button id="guessSubmitBtn" class="main">Sprawdz</button>
+				</div>
+				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
 			</div>
 			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na kolejna fase.</p>
 
@@ -287,6 +366,7 @@
 		const quizPlaybackInfo = document.getElementById("quizPlaybackInfo");
 		const guessInput = document.getElementById("guessInput");
 		const guessSubmitBtn = document.getElementById("guessSubmitBtn");
+		const guessSuggestList = document.getElementById("guessSuggestList");
 		const readyBtn = document.getElementById("readyBtn");
 		const result = document.getElementById("result");
 		const resetBtn = document.getElementById("resetBtn");
@@ -303,12 +383,17 @@
 		let currentScores = {};
 		let currentPlayerNames = {};
 		let currentGuessed = {};
+		let currentPlayerAvatars = {};
+		let lastStateUpdateMs = 0;
 		let localVolume = 100;
 		let lastQuizCommandToken = 0;
 		let clipStopTimer = null;
 		let autoAdvanceEnabled = true;
 		let autoAdvanceTimer = null;
 		let myReady = false;
+		let currentArtistHints = {};
+		let suggestDebounceTimer = null;
+		let suggestHideTimer = null;
 
 		const MUSIC_PRESETS = [
 			{ value: "polski hip hop", label: "Polski hip hop" },
@@ -410,6 +495,36 @@
 			return Boolean(currentGuessed[String(player)]);
 		}
 
+		function isArtistHint(player) {
+			return Boolean(currentArtistHints[String(player)]);
+		}
+
+		function escapeHtml(text) {
+			const s = String(text || "");
+			return s
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function buildAvatarHtml(key, displayName) {
+			const path = currentPlayerAvatars[key];
+			let src = "";
+			if (path) {
+				src = buildApiUrl(String(path)) + "?v=" + String(lastStateUpdateMs);
+			}
+			if (src) {
+				return (
+					'<span class="sb-ava"><img class="sb-avatar-img" src="' +
+					escapeHtml(src) +
+					'" alt="" width="40" height="40" loading="lazy" /></span>'
+				);
+			}
+			const ch = String(displayName || "?").trim().charAt(0).toUpperCase() || "?";
+			return '<span class="sb-ava">' + escapeHtml(ch) + "</span>";
+		}
+
 		function renderScoreboard() {
 			const rows = [];
 			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
@@ -422,8 +537,22 @@
 				}
 				if (isPlayerGuessed(i)) {
 					rowClass = rowClass + " guessed-row";
+				} else if (isArtistHint(i)) {
+					rowClass = rowClass + " artist-hint-row";
 				}
-				rows.push('<div class="' + rowClass + '"><span>' + label + ' (P' + i + ')</span><span>' + score + "</span></div>");
+				rows.push(
+					'<div class="' +
+						rowClass +
+						'">' +
+						buildAvatarHtml(key, label) +
+						'<span class="score-name-cell">' +
+						escapeHtml(label) +
+						" (P" +
+						i +
+						")</span><span>" +
+						score +
+						"</span></div>"
+				);
 			}
 			scoreboard.innerHTML = rows.join("");
 			const points = toIntScore(currentScores[String(myPlayer)]);
@@ -439,6 +568,58 @@
 			localVolume = clampVolume(localStorage.getItem(getVolumeStorageKey()));
 			volumeRange.value = String(localVolume);
 			applyVolume();
+		}
+
+		function hideGuessSuggest() {
+			guessSuggestList.classList.add("hidden");
+			guessSuggestList.innerHTML = "";
+		}
+
+		function scheduleDeezerSuggest() {
+			if (suggestDebounceTimer) {
+				clearTimeout(suggestDebounceTimer);
+			}
+			suggestDebounceTimer = setTimeout(runDeezerSuggest, 320);
+		}
+
+		async function runDeezerSuggest() {
+			suggestDebounceTimer = null;
+			const term = String(guessInput.value || "").trim();
+			if (term.length < 2) {
+				hideGuessSuggest();
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/deezer-search?q=" + encodeURIComponent(term) + "&limit=18");
+				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+				if (!tracks.length) {
+					hideGuessSuggest();
+					return;
+				}
+				const items = tracks.map((tr, idx) => {
+					const lab = String(tr.label || "Utwor").replace(/</g, "").replace(/"/g, "");
+					return '<li><button type="button" class="guess-suggest-item" data-idx="' + idx + '">' + lab + "</button></li>";
+				});
+				guessSuggestList.innerHTML = items.join("");
+				guessSuggestList.classList.remove("hidden");
+				const buttons = guessSuggestList.querySelectorAll(".guess-suggest-item");
+				buttons.forEach((btn) => {
+					btn.addEventListener("mousedown", (event) => {
+						event.preventDefault();
+					});
+					btn.addEventListener("click", () => {
+						const idx = Number(btn.dataset.idx);
+						const picked = tracks[idx];
+						if (!picked) {
+							return;
+						}
+						guessInput.value = String(picked.label || "");
+						hideGuessSuggest();
+					});
+				});
+			} catch (err) {
+				hideGuessSuggest();
+			}
 		}
 
 		async function fetchJson(path, options) {
@@ -578,7 +759,10 @@
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			currentPlayerAvatars = state.playerAvatars || {};
+			lastStateUpdateMs = Number(state.lastUpdateMs || 0);
 			currentGuessed = state.quizGuessedPlayers || {};
+			currentArtistHints = state.quizArtistHintPlayers || {};
 			const readyPlayers = state.quizReadyPlayers || {};
 			myReady = Boolean(readyPlayers[String(myPlayer)]);
 			const revealOn = Boolean(state.quizRevealActive);
@@ -654,18 +838,24 @@
 				setStatus("za krotka odpowiedz");
 				return;
 			}
+			hideGuessSuggest();
 			try {
 				const data = await fetchJson("/api/quiz-guess", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ player: myPlayer, name: myName, guess: text })
 				});
-				guessInput.value = "";
 				updateByState(data.state);
-				setStatus("trafione");
+				if (data.artistHintOnly) {
+					setStatus("Trafiony artysta — dopisz tytul (albo wybierz z listy)");
+				} else {
+					guessInput.value = "";
+					setStatus("trafione");
+				}
 			} catch (err) {
 				const msg = err && err.message ? String(err.message) : "blad";
 				setStatus(msg);
+				refreshState();
 			}
 		}
 
@@ -779,6 +969,18 @@
 			setReady(!myReady);
 		});
 		guessSubmitBtn.addEventListener("click", markGuess);
+		guessInput.addEventListener("input", () => {
+			scheduleDeezerSuggest();
+		});
+		guessInput.addEventListener("focus", () => {
+			scheduleDeezerSuggest();
+		});
+		guessInput.addEventListener("blur", () => {
+			if (suggestHideTimer) {
+				clearTimeout(suggestHideTimer);
+			}
+			suggestHideTimer = setTimeout(hideGuessSuggest, 200);
+		});
 		guessInput.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") {
 				markGuess();

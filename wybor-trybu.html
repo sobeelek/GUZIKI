@@ -21,7 +21,7 @@
 		}
 
 		.panel {
-			width: min(560px, 94vw);
+			width: min(720px, 96vw);
 			padding: 28px;
 			border-radius: 16px;
 			background: #1f2937;
@@ -61,12 +61,111 @@
 		button.secondary {
 			background: #374151;
 		}
+
+		.avatar-block {
+			text-align: left;
+			border: 1px solid #374151;
+			border-radius: 12px;
+			padding: 12px;
+			display: grid;
+			gap: 10px;
+			background: #111827;
+		}
+
+		.avatar-block label {
+			font-size: 13px;
+			color: #d1d5db;
+		}
+
+		.avatar-recomm {
+			margin: 0;
+			font-size: 12px;
+			color: #9ca3af;
+			line-height: 1.4;
+		}
+
+		.preset-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+			gap: 10px;
+			max-height: 300px;
+			overflow-y: auto;
+			padding: 4px 0;
+		}
+
+		.preset-item {
+			position: relative;
+			border: 3px solid transparent;
+			border-radius: 14px;
+			padding: 0;
+			background: #0b1220;
+			cursor: pointer;
+			overflow: hidden;
+			aspect-ratio: 1;
+		}
+
+		.preset-item img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			display: block;
+			vertical-align: middle;
+		}
+
+		.preset-item.selected {
+			border-color: #22c55e;
+			box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+		}
+
+		.preset-item.taken {
+			opacity: 0.38;
+			cursor: not-allowed;
+			filter: grayscale(0.5);
+		}
+
+		.preset-item .preset-badge {
+			position: absolute;
+			bottom: 4px;
+			left: 50%;
+			transform: translateX(-50%);
+			font-size: 9px;
+			font-weight: 800;
+			background: rgba(0, 0, 0, 0.65);
+			color: #fecaca;
+			padding: 2px 6px;
+			border-radius: 6px;
+			pointer-events: none;
+			white-space: nowrap;
+		}
+
+		.avatar-btns {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			justify-content: center;
+		}
+
+		.avatar-hint {
+			margin: 0;
+			font-size: 12px;
+			color: #9ca3af;
+			min-height: 18px;
+		}
 	</style>
 </head>
 <body>
 	<div class="panel">
 		<h1>Wybierz tryb gry</h1>
 		<p class="info" id="meInfo"></p>
+		<div class="avatar-block">
+			<label>Awatar z listy (wrzuc swoje pliki do folderu <strong>avatar_presets</strong> obok server.py)</label>
+			<p class="avatar-recomm">Najlepiej kwadrat <strong>128×128</strong> lub <strong>256×256</strong> px (PNG/JPG/WebP). W rankingu wyswietlamy <strong>40×40</strong> px w kolku.</p>
+			<div id="presetGrid" class="preset-grid"></div>
+			<div class="avatar-btns">
+				<button type="button" id="avatarClearBtn" class="secondary">Usun moj wybor</button>
+			</div>
+			<p class="avatar-hint" id="avatarHint"></p>
+		</div>
 		<div class="buttons">
 			<button id="classicBtn">Tryb klasyczny</button>
 			<button id="deezerBtn">Quiz muzyczny Deezer</button>
@@ -79,6 +178,15 @@
 		const classicBtn = document.getElementById("classicBtn");
 		const deezerBtn = document.getElementById("deezerBtn");
 		const changeNickBtn = document.getElementById("changeNickBtn");
+		const presetGrid = document.getElementById("presetGrid");
+		const avatarClearBtn = document.getElementById("avatarClearBtn");
+		const avatarHint = document.getElementById("avatarHint");
+
+		let cachedPresets = [];
+		let lastGameState = null;
+		let statePollTimer = null;
+
+		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 
 		function getStorageKey(prefix) {
 			return "buzzer_" + prefix;
@@ -100,6 +208,140 @@
 			window.location.href = "wybor-ksywy.html";
 		}
 
+		function buildApiUrl(path) {
+			return String(API_BASE_URL || "").replace(/\/+$/, "") + path;
+		}
+
+		function defaultNameForSlot(slot) {
+			return "Gracz " + slot;
+		}
+
+		function isSlotOccupied(state, slot) {
+			const key = String(slot);
+			const nm = state.playerNames && state.playerNames[key] ? String(state.playerNames[key]).trim() : "";
+			return nm.length > 0 && nm !== defaultNameForSlot(slot);
+		}
+
+		function isPresetTakenByOther(state, presetId, myPlayer) {
+			const target = "/avatar_presets/" + presetId;
+			const pa = state.playerAvatars || {};
+			for (let j = 1; j <= 8; j = j + 1) {
+				if (j === myPlayer) {
+					continue;
+				}
+				if (!isSlotOccupied(state, j)) {
+					continue;
+				}
+				if (String(pa[String(j)] || "") === target) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		async function fetchGameState() {
+			const response = await fetch(buildApiUrl("/api/buzzer-state"));
+			return response.json();
+		}
+
+		async function loadPresetList() {
+			const response = await fetch(buildApiUrl("/api/avatar-presets"));
+			const data = await response.json();
+			cachedPresets = Array.isArray(data.presets) ? data.presets : [];
+		}
+
+		function renderPresetGrid() {
+			const player = Number(localStorage.getItem(getStorageKey("player")));
+			const state = lastGameState;
+			if (!cachedPresets.length) {
+				presetGrid.innerHTML =
+					'<p class="avatar-hint" style="grid-column:1/-1;">Brak obrazkow — dodaj pliki PNG/JPG/WebP/GIF do folderu avatar_presets (obok server.py), zrestartuj serwer i odswiez strone.</p>';
+				return;
+			}
+			const mine = state && state.playerAvatars ? String(state.playerAvatars[String(player)] || "") : "";
+			const v = state ? Number(state.lastUpdateMs || 0) : 0;
+			const rows = [];
+			for (let i = 0; i < cachedPresets.length; i = i + 1) {
+				const pr = cachedPresets[i];
+				const id = String(pr.id || "");
+				const urlPath = String(pr.url || "");
+				const imgSrc = buildApiUrl(urlPath) + "?v=" + String(v);
+				const targetUrl = "/avatar_presets/" + id;
+				const taken = state ? isPresetTakenByOther(state, id, player) : false;
+				const selected = mine === targetUrl;
+				let cls = "preset-item";
+				if (selected) {
+					cls = cls + " selected";
+				}
+				if (taken) {
+					cls = cls + " taken";
+				}
+				let badge = "";
+				if (taken) {
+					badge = '<span class="preset-badge">Zajete</span>';
+				}
+				rows.push(
+					'<button type="button" class="' +
+						cls +
+						'" data-id="' +
+						id.replace(/"/g, "") +
+						'" data-taken="' +
+						(taken ? "1" : "0") +
+						'"><img src="' +
+						imgSrc.replace(/"/g, "") +
+						'" alt="" loading="lazy" />' +
+						badge +
+						"</button>"
+				);
+			}
+			presetGrid.innerHTML = rows.join("");
+			const buttons = presetGrid.querySelectorAll(".preset-item");
+			buttons.forEach((btn) => {
+				btn.addEventListener("click", () => {
+					if (btn.getAttribute("data-taken") === "1") {
+						avatarHint.textContent = "Ten awatar jest juz zajety.";
+						return;
+					}
+					const id = btn.getAttribute("data-id");
+					if (!id) {
+						return;
+					}
+					const pl = Number(localStorage.getItem(getStorageKey("player")));
+					const nm = safeName(localStorage.getItem(getStorageKey("name")));
+					if (!isValidPlayer(pl) || !nm) {
+						goToNickChoice();
+						return;
+					}
+					fetch(buildApiUrl("/api/buzzer-avatar"), {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ player: pl, name: nm, preset: id })
+					})
+						.then((response) => response.json().then((data) => ({ ok: response.ok, data: data })))
+						.then((result) => {
+							if (!result.ok) {
+								throw new Error(result.data && result.data.error ? String(result.data.error) : "Blad");
+							}
+							lastGameState = result.data.state;
+							avatarHint.textContent = "Wybrano awatar.";
+							renderPresetGrid();
+						})
+						.catch((err) => {
+							avatarHint.textContent = String(err && err.message ? err.message : err);
+						});
+				});
+			});
+		}
+
+		async function syncStateAndGrid() {
+			try {
+				lastGameState = await fetchGameState();
+				renderPresetGrid();
+			} catch (err) {
+				avatarHint.textContent = "Brak polaczenia z serwerem.";
+			}
+		}
+
 		{
 			const player = Number(localStorage.getItem(getStorageKey("player")));
 			const name = safeName(localStorage.getItem(getStorageKey("name")));
@@ -107,8 +349,40 @@
 				goToNickChoice();
 			} else {
 				meInfo.textContent = "Zalogowany: " + name + " (gracz " + player + ")";
+				loadPresetList()
+					.then(syncStateAndGrid)
+					.catch(() => {
+						avatarHint.textContent = "Nie mozna zaladowac listy avatarow.";
+					});
+				statePollTimer = setInterval(syncStateAndGrid, 900);
 			}
 		}
+
+		avatarClearBtn.addEventListener("click", () => {
+			const pl = Number(localStorage.getItem(getStorageKey("player")));
+			const nm = safeName(localStorage.getItem(getStorageKey("name")));
+			if (!isValidPlayer(pl) || !nm) {
+				goToNickChoice();
+				return;
+			}
+			fetch(buildApiUrl("/api/buzzer-avatar"), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ player: pl, name: nm, clear: true })
+			})
+				.then((response) => response.json().then((data) => ({ ok: response.ok, data: data })))
+				.then((result) => {
+					if (!result.ok) {
+						throw new Error(result.data && result.data.error ? String(result.data.error) : "Blad");
+					}
+					lastGameState = result.data.state;
+					avatarHint.textContent = "Usunieto wybor.";
+					renderPresetGrid();
+				})
+				.catch((err) => {
+					avatarHint.textContent = String(err && err.message ? err.message : err);
+				});
+		});
 
 		classicBtn.addEventListener("click", () => {
 			window.location.href = "szybkie-guziki.html";

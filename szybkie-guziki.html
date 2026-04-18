@@ -309,11 +309,39 @@
 
 		.score-row {
 			display: grid;
-			grid-template-columns: 1fr auto;
+			grid-template-columns: auto 1fr auto;
+			align-items: center;
 			padding: 8px 10px;
 			gap: 8px;
 			background: #0f172a;
 			border-bottom: 1px solid #1f2937;
+		}
+
+		.sb-ava {
+			width: 40px;
+			height: 40px;
+			border-radius: 50%;
+			overflow: hidden;
+			flex-shrink: 0;
+			background: #334155;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 14px;
+			font-weight: 800;
+			color: #e2e8f0;
+		}
+
+		.sb-avatar-img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			display: block;
+		}
+
+		.score-name-cell {
+			min-width: 0;
+			word-break: break-word;
 		}
 
 		.score-row:last-child {
@@ -423,6 +451,8 @@
 		let currentVideoTimeSec = 0;
 		let currentScores = {};
 		let currentPlayerNames = {};
+		let currentPlayerAvatars = {};
+		let lastStateUpdateMs = 0;
 		let ytApiReady = false;
 		let ytPlayer = null;
 		let currentVideoId = "";
@@ -485,6 +515,32 @@
 			return "Gracz " + player;
 		}
 
+		function escapeHtml(text) {
+			const s = String(text || "");
+			return s
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function buildAvatarHtml(key, displayName) {
+			const path = currentPlayerAvatars[key];
+			let src = "";
+			if (path) {
+				src = buildApiUrl(String(path)) + "?v=" + String(lastStateUpdateMs);
+			}
+			if (src) {
+				return (
+					'<span class="sb-ava"><img class="sb-avatar-img" src="' +
+					escapeHtml(src) +
+					'" alt="" width="40" height="40" loading="lazy" /></span>'
+				);
+			}
+			const ch = String(displayName || "?").trim().charAt(0).toUpperCase() || "?";
+			return '<span class="sb-ava">' + escapeHtml(ch) + "</span>";
+		}
+
 		function renderScoreboard() {
 			const rows = [];
 			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
@@ -495,9 +551,11 @@
 				rows.push(
 					'<div class="' +
 						rowClass +
-						'"><span>' +
-						name +
-						' (P' +
+						'">' +
+						buildAvatarHtml(key, name) +
+						'<span class="score-name-cell">' +
+						escapeHtml(name) +
+						" (P" +
 						i +
 						')</span><span class="score-points">' +
 						points +
@@ -807,6 +865,8 @@
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			currentPlayerAvatars = state.playerAvatars || {};
+			lastStateUpdateMs = Number(state.lastUpdateMs || 0);
 			currentVideoTimeSec = Number(state.videoTimeSec || 0);
 			const winner = state.winner;
 			const winnerName = state.winnerName || ("Gracz " + winner);

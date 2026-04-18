@@ -17,6 +17,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
+AVATAR_DIR = os.path.join(DATA_DIR, "avatars")
+AVATAR_PRESET_DIR = os.path.join(BASE_DIR, "avatar_presets")
 MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
 VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
@@ -53,6 +55,10 @@ def _default_player_names():
 	return {str(i): "Gracz %d" % i for i in range(1, MAX_PLAYERS + 1)}
 
 
+def _default_player_avatars():
+	return {str(i): "" for i in range(1, MAX_PLAYERS + 1)}
+
+
 def _default_name_for_player(player):
 	return "Gracz %d" % player
 
@@ -79,9 +85,11 @@ BUZZER_STATE = {
 	"quiz_round_active": False,
 	"quiz_phase_index": -1,
 	"quiz_guessed_players": {},
+	"quiz_artist_hint_players": {},
 	"quiz_ready_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
+	"player_avatars": _default_player_avatars(),
 	"last_update_ms": 0,
 }
 
@@ -89,6 +97,8 @@ BUZZER_STATE = {
 def ensure_dirs():
 	os.makedirs(DATA_DIR, exist_ok=True)
 	os.makedirs(CMR_DIR, exist_ok=True)
+	os.makedirs(AVATAR_DIR, exist_ok=True)
+	os.makedirs(AVATAR_PRESET_DIR, exist_ok=True)
 
 
 def read_orders():
@@ -251,6 +261,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		for i in range(1, MAX_PLAYERS + 1):
 			# Najważniejsze: po resecie kolejna runda wymaga ponownego Gotowy (unikamy podwójnego autostartu).
 			BUZZER_STATE["quiz_ready_players"][str(i)] = False
+			BUZZER_STATE["quiz_artist_hint_players"][str(i)] = False
 
 	def _ensure_round_started(self):
 		if BUZZER_STATE["round_started_ms"] == 0:
@@ -270,6 +281,72 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if key not in BUZZER_STATE["player_names"]:
 				BUZZER_STATE["player_names"][key] = "Gracz %d" % i
 
+	def _ensure_player_avatars(self):
+		pa = BUZZER_STATE.get("player_avatars")
+		if not isinstance(pa, dict):
+			BUZZER_STATE["player_avatars"] = _default_player_avatars()
+			pa = BUZZER_STATE["player_avatars"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in pa:
+				pa[key] = ""
+
+	def _sanitize_avatar_preset_filename(self, raw):
+		name = os.path.basename(str(raw or "").strip())
+		if not name or name in (".", ".."):
+			return None
+		if not re.match(r"^[A-Za-z0-9._-]+$", name):
+			return None
+		low = name.lower()
+		if not (
+			low.endswith(".png")
+			or low.endswith(".jpg")
+			or low.endswith(".jpeg")
+			or low.endswith(".webp")
+			or low.endswith(".gif")
+		):
+			return None
+		path = os.path.join(AVATAR_PRESET_DIR, name)
+		if not os.path.isfile(path):
+			return None
+		return name
+
+	def _avatar_preset_public_url(self, filename):
+		return "/avatar_presets/" + filename
+
+	def _is_avatar_preset_taken(self, public_url, except_key):
+		self._ensure_player_avatars()
+		for i in range(1, MAX_PLAYERS + 1):
+			k = str(i)
+			if k == except_key:
+				continue
+			if not self._is_player_occupied(i):
+				continue
+			cur = str(BUZZER_STATE["player_avatars"].get(k, "")).strip()
+			if cur == public_url:
+				return True
+		return False
+
+	def _delete_legacy_uploaded_avatar_file(self, key):
+		self._ensure_player_avatars()
+		prev = str(BUZZER_STATE.get("player_avatars", {}).get(key, "")).strip()
+		if prev.startswith("/data/avatars/"):
+			rel = prev.lstrip("/").replace("/", os.sep)
+			path = os.path.join(BASE_DIR, rel)
+			if os.path.isfile(path):
+				try:
+					os.remove(path)
+				except Exception:
+					pass
+		stem = os.path.join(AVATAR_DIR, "p%s" % key)
+		for ext in (".jpg", ".png", ".webp"):
+			path = stem + ext
+			if os.path.isfile(path):
+				try:
+					os.remove(path)
+				except Exception:
+					pass
+
 	def _ensure_quiz_state(self):
 		guessed = BUZZER_STATE.get("quiz_guessed_players")
 		if not isinstance(guessed, dict):
@@ -285,6 +362,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 				guessed[key] = False
 			if key not in ready:
 				ready[key] = False
+		hint = BUZZER_STATE.get("quiz_artist_hint_players")
+		if not isinstance(hint, dict):
+			BUZZER_STATE["quiz_artist_hint_players"] = {}
+			hint = BUZZER_STATE["quiz_artist_hint_players"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in hint:
+				hint[key] = False
 		mq = BUZZER_STATE.get("quiz_music_query")
 		if not isinstance(mq, str) or len(str(mq).strip()) < 2:
 			# Najważniejsze: domyślny typ muzyki przy starym stanie serwera bez tego pola.
@@ -375,6 +460,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		for i in range(1, MAX_PLAYERS + 1):
 			key = str(i)
 			BUZZER_STATE["quiz_guessed_players"][key] = False
+			BUZZER_STATE["quiz_artist_hint_players"][key] = False
 		BUZZER_STATE["quiz_round_active"] = True
 		BUZZER_STATE["quiz_phase_index"] = 0
 		BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
@@ -441,6 +527,39 @@ class AppHandler(SimpleHTTPRequestHandler):
 		ok_a = all(w in g for w in toks_a) if toks_a else (a in g)
 		return bool(ok_t and ok_a)
 
+	def _artist_words_in_guess(self, guess, artist):
+		g = _fold_text_answer(guess)
+		a = _fold_text_answer(artist)
+		if len(a) < 2:
+			return False
+		if a in g:
+			return True
+		words = [w for w in a.split() if len(w) > 2]
+		if not words:
+			return a in g
+		return all(w in g for w in words)
+
+	def _title_words_in_guess(self, guess, title):
+		title_clean = _strip_title_feat(title)
+		g = _fold_text_answer(guess)
+		t = _fold_text_answer(title_clean)
+		if len(t) < 2:
+			return False
+		if t in g:
+			return True
+		words = [w for w in t.split() if len(w) > 2]
+		if not words:
+			return t in g
+		return all(w in g for w in words)
+
+	def _artist_only_matches_round(self, guess, title, artist):
+		# Najważniejsze: poprawny artysta biezacego utworu, ale bez pelnego trafienia tytulu (podswietlenie zolte).
+		if self._guess_matches_deezer(guess, title, artist):
+			return False
+		if not self._artist_words_in_guess(guess, artist):
+			return False
+		return not self._title_words_in_guess(guess, title)
+
 	def _begin_quiz_reveal(self):
 		self._ensure_quiz_state()
 		BUZZER_STATE["quiz_round_active"] = False
@@ -453,6 +572,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		for i in range(1, MAX_PLAYERS + 1):
 			# Najważniejsze: po ujawnieniu trzeba znowu zaznaczyc Gotowy przed kolejna piosenka.
 			BUZZER_STATE["quiz_ready_players"][str(i)] = False
+			BUZZER_STATE["quiz_artist_hint_players"][str(i)] = False
 		BUZZER_STATE["last_update_ms"] = self._now_ms()
 
 	def _advance_quiz_phase(self):
@@ -470,6 +590,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _public_buzzer_state(self):
 		self._ensure_scores_and_names()
 		self._ensure_quiz_state()
+		self._ensure_player_avatars()
 		# Najważniejsze: tytul/artysta tylko w fazie ujawnienia (po rundzie), nie podczas zgadywania.
 		show_quiz_answer = bool(BUZZER_STATE.get("quiz_reveal_active"))
 		ql = BUZZER_STATE.get("quiz_track_label", "") if show_quiz_answer else ""
@@ -500,6 +621,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizPhaseDurations": QUIZ_PHASE_DURATIONS,
 			"quizPhasePoints": QUIZ_PHASE_POINTS,
 			"quizGuessedPlayers": BUZZER_STATE["quiz_guessed_players"],
+			"quizArtistHintPlayers": BUZZER_STATE["quiz_artist_hint_players"],
 			"quizGuessedCount": self._count_guessed_players(),
 			"quizReadyPlayers": BUZZER_STATE["quiz_ready_players"],
 			"quizReadyCount": self._count_ready_players(),
@@ -507,6 +629,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"videoControllerName": VIDEO_CONTROLLER_NAME,
 			"scores": BUZZER_STATE["scores"],
 			"playerNames": BUZZER_STATE["player_names"],
+			"playerAvatars": BUZZER_STATE["player_avatars"],
 			"lastUpdateMs": BUZZER_STATE["last_update_ms"],
 		}
 
@@ -524,6 +647,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/deezer-polish-hiphop":
 			self.handle_deezer_polish_hiphop_get(parsed.query)
+			return
+		if parsed.path == "/api/avatar-presets":
+			self.handle_avatar_presets_get()
 			return
 		super().do_GET()
 
@@ -558,6 +684,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-leave":
 			self.handle_buzzer_leave_post()
+			return
+		if parsed.path == "/api/buzzer-avatar":
+			self.handle_buzzer_avatar_post()
 			return
 		if parsed.path == "/api/quiz-music-type":
 			self.handle_quiz_music_type_post()
@@ -814,6 +943,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["player_names"][str(assigned_player)] = player_name
 			BUZZER_STATE["quiz_ready_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_guessed_players"][str(assigned_player)] = False
+			BUZZER_STATE["quiz_artist_hint_players"][str(assigned_player)] = False
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response(
 				{
@@ -851,8 +981,77 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["player_names"][key] = _default_name_for_player(player)
 			BUZZER_STATE["quiz_ready_players"][key] = False
 			BUZZER_STATE["quiz_guessed_players"][key] = False
+			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			self._delete_legacy_uploaded_avatar_file(key)
+			self._ensure_player_avatars()
+			BUZZER_STATE["player_avatars"][key] = ""
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "released": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_avatar_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_player_avatars()
+			ensure_dirs()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			player = self._sanitize_player(parsed.get("player"))
+			if player is None:
+				self.json_response({"error": "Invalid player number"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
+			key = str(player)
+			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+			if not self._same_name(current_name, name):
+				self.json_response({"error": "Player identity mismatch"}, 403)
+				return
+			if bool(parsed.get("clear")):
+				self._delete_legacy_uploaded_avatar_file(key)
+				BUZZER_STATE["player_avatars"][key] = ""
+				BUZZER_STATE["last_update_ms"] = self._now_ms()
+				self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+				return
+			filename = self._sanitize_avatar_preset_filename(parsed.get("preset"))
+			if not filename:
+				self.json_response({"error": "Niepoprawny lub brak pliku w avatar_presets"}, 400)
+				return
+			public_url = self._avatar_preset_public_url(filename)
+			if self._is_avatar_preset_taken(public_url, key):
+				self.json_response({"error": "Ten avatar jest juz zajety przez innego gracza"}, 400)
+				return
+			self._delete_legacy_uploaded_avatar_file(key)
+			BUZZER_STATE["player_avatars"][key] = public_url
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_avatar_presets_get(self):
+		try:
+			ensure_dirs()
+			out = []
+			if os.path.isdir(AVATAR_PRESET_DIR):
+				for name in sorted(os.listdir(AVATAR_PRESET_DIR)):
+					if name.startswith("."):
+						continue
+					low = name.lower()
+					if not (
+						low.endswith(".png")
+						or low.endswith(".jpg")
+						or low.endswith(".jpeg")
+						or low.endswith(".webp")
+						or low.endswith(".gif")
+					):
+						continue
+					out.append({"id": name, "url": self._avatar_preset_public_url(name)})
+			self.json_response({"presets": out}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
@@ -1134,16 +1333,24 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return
 			title = str(BUZZER_STATE.get("quiz_track_title", "") or "")
 			artist = str(BUZZER_STATE.get("quiz_track_artist", "") or "")
-			if not self._guess_matches_deezer(guess, title, artist):
-				self.json_response({"error": "Nie trafione — sprobuj inaczej (np. artysta - tytul)"}, 400)
+			if self._guess_matches_deezer(guess, title, artist):
+				BUZZER_STATE["quiz_artist_hint_players"][key] = False
+				BUZZER_STATE["quiz_guessed_players"][key] = True
+				points = self._quiz_points_for_phase()
+				BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + points
+				BUZZER_STATE["last_update_ms"] = self._now_ms()
+				if self._count_guessed_players() >= self._count_occupied_players():
+					self._begin_quiz_reveal()
+				self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 				return
-			BUZZER_STATE["quiz_guessed_players"][key] = True
-			points = self._quiz_points_for_phase()
-			BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + points
-			BUZZER_STATE["last_update_ms"] = self._now_ms()
-			if self._count_guessed_players() >= self._count_occupied_players():
-				self._begin_quiz_reveal()
-			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+			if self._artist_only_matches_round(guess, title, artist):
+				BUZZER_STATE["quiz_artist_hint_players"][key] = True
+				BUZZER_STATE["last_update_ms"] = self._now_ms()
+				self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
+				return
+			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			self.json_response({"error": "Nie trafione — sprobuj inaczej (np. artysta - tytul)"}, 400)
+			return
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
