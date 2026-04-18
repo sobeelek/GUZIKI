@@ -1,4 +1,7 @@
-import cgi
+try:
+	import cgi
+except Exception:
+	cgi = None
 import json
 import os
 import re
@@ -158,6 +161,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 	def handle_upload_cmr_post(self):
 		try:
+			if cgi is None:
+				self.json_response({"error": "Upload CMR chwilowo niedostepny na tej wersji Pythona"}, 501)
+				return
 			form = cgi.FieldStorage(
 				fp=self.rfile,
 				headers=self.headers,
