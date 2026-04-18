@@ -128,7 +128,6 @@ QUIZ_POOL_WHITELIST_ARTISTS = (
 	"Dawid Podsiadło",
 	"Bedoes",
 	"Kabe",
-	"Javier",
 	"Kinny Zimmer",
 	"Fukaj",
 	"Chivas",
@@ -287,6 +286,7 @@ BUZZER_STATE = {
 	"quiz_skips_used": {},
 	"quiz_round_limit": 0,
 	"quiz_rounds_played": 0,
+	"quiz_used_track_ids": [],
 	"quiz_ready_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
@@ -640,6 +640,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_round_limit"] = 0
 		if "quiz_rounds_played" not in BUZZER_STATE:
 			BUZZER_STATE["quiz_rounds_played"] = 0
+		qu = BUZZER_STATE.get("quiz_used_track_ids")
+		if not isinstance(qu, list):
+			BUZZER_STATE["quiz_used_track_ids"] = []
+			qu = BUZZER_STATE["quiz_used_track_ids"]
 
 	def _append_quiz_guess_history(self, key, text, kind):
 		# Najważniejsze: lista prób — pelny tekst + rodzaj: correct | artist_hint | wrong | skip (kolory na kliencie).
@@ -874,39 +878,62 @@ class AppHandler(SimpleHTTPRequestHandler):
 			out.append(t)
 		return out
 
-	def _weighted_quiz_track_choice(self, tracks):
-		# Najważniejsze: mocna losowość (mix gatunków) + częściowo rank; sam rank faworyzował jedną scenę.
-		if not tracks:
-			return None
-		if random.random() < 0.62:
-			return random.choice(tracks)
-		ws = []
-		for t in tracks:
-			r = max(1, int(t.get("rank") or 0))
-			ws.append(float(r) ** 0.45)
-		return random.choices(tracks, weights=ws, k=1)[0]
-
-	def _pick_random_quiz_track(self):
-		# Najważniejsze: utwór z polskiej puli — losowość + lekki bias rank (żeby nie jedna scena).
-		tracks = self._build_quiz_track_pool_for_query(self._current_quiz_music_query())
-		if not tracks:
-			return None
-		last_id = str(BUZZER_STATE.get("quiz_track_id", "")).strip()
-		cands = [t for t in tracks if str(t.get("id", "")).strip() != last_id]
-		if not cands:
-			cands = tracks
-		return self._weighted_quiz_track_choice(cands)
-
-	def _pick_random_quiz_track_excluding(self, query_raw, exclude_id):
-		# Najważniejsze: losowanie dla quizu solo — inny utwor niz poprzedni w sesji.
+	def _pick_quiz_track_unique_random(self, query_raw, used_ids_list, last_exclude_id):
+		# Najważniejsze: każdy track_id max raz na cykl — po wyczerpaniu puli reset „już grane” + shuffle zamiast wag rank.
 		tracks = self._build_quiz_track_pool_for_query(query_raw)
 		if not tracks:
 			return None
-		ex = str(exclude_id or "").strip()
-		cands = [t for t in tracks if str(t.get("id", "")).strip() != ex]
+
+		def tidof(t):
+			return str(t.get("id", "")).strip()
+
+		ex = str(last_exclude_id or "").strip()
+		used_set = set(str(x).strip() for x in used_ids_list if str(x).strip())
+		cands = []
+		for t in tracks:
+			tid = tidof(t)
+			if not tid:
+				continue
+			if tid in used_set:
+				continue
+			if tid == ex:
+				continue
+			cands.append(t)
 		if not cands:
-			cands = tracks
-		return self._weighted_quiz_track_choice(cands)
+			used_ids_list[:] = []
+			for t in tracks:
+				tid = tidof(t)
+				if not tid:
+					continue
+				if tid == ex:
+					continue
+				cands.append(t)
+		if not cands:
+			cands = [t for t in tracks if tidof(t)]
+		if not cands:
+			return None
+		random.shuffle(cands)
+		ch = cands[0]
+		tid = tidof(ch)
+		if tid:
+			used_ids_list.append(tid)
+		return ch
+
+	def _pick_random_quiz_track(self):
+		# Najważniejsze: multiplayer — losowo z puli bez powtórek do końca cyklu.
+		self._ensure_quiz_state()
+		used = BUZZER_STATE.get("quiz_used_track_ids")
+		if not isinstance(used, list):
+			BUZZER_STATE["quiz_used_track_ids"] = []
+			used = BUZZER_STATE["quiz_used_track_ids"]
+		last_id = str(BUZZER_STATE.get("quiz_track_id", "")).strip()
+		return self._pick_quiz_track_unique_random(self._current_quiz_music_query(), used, last_id)
+
+	def _pick_random_quiz_track_excluding(self, query_raw, exclude_id, used_ids_list):
+		# Najważniejsze: solo — ta sama rotacja co multiplayer (lista used w sesji).
+		if not isinstance(used_ids_list, list):
+			return self._pick_quiz_track_unique_random(query_raw, [], exclude_id)
+		return self._pick_quiz_track_unique_random(query_raw, used_ids_list, exclude_id)
 
 	def _quiz_round_limit_reached(self):
 		# Najważniejsze: sesja quizu z limitem — nie startuj kolejnego utworu gdy wykorzystano pulę rund.
@@ -1234,9 +1261,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 				"command_token": 0,
 				"listen_token": 0,
 				"total_score": 0,
+				"used_track_ids": [],
 			}
 			SOLO_QUIZ_SESSIONS[tok] = sess
-		tr = self._pick_random_quiz_track_excluding(sess["music_query"], "")
+		tr = self._pick_random_quiz_track_excluding(sess["music_query"], "", sess["used_track_ids"])
 		if not tr:
 			with SOLO_QUIZ_LOCK:
 				if tok in SOLO_QUIZ_SESSIONS:
@@ -1246,7 +1274,13 @@ class AppHandler(SimpleHTTPRequestHandler):
 		return sess, None
 
 	def _solo_next_round(self, sess):
-		tr = self._pick_random_quiz_track_excluding(sess.get("music_query"), sess.get("track_id"))
+		if not isinstance(sess.get("used_track_ids"), list):
+			sess["used_track_ids"] = []
+		tr = self._pick_random_quiz_track_excluding(
+			sess.get("music_query"),
+			sess.get("track_id"),
+			sess.get("used_track_ids"),
+		)
 		if not tr:
 			return False
 		self._solo_start_round_with_track(sess, tr)
@@ -1559,9 +1593,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-avatar":
 			self.handle_buzzer_avatar_post()
-			return
-		if parsed.path == "/api/quiz-music-type":
-			self.handle_quiz_music_type_post()
 			return
 		if parsed.path == "/api/quiz-track":
 			self.handle_quiz_track_post()
@@ -2596,8 +2627,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 				raw_bucket.sort(key=lambda it: self._deezer_search_total_score(term, it), reverse=True)
 			except Exception:
 				pass
+			wl_raw = (parsed_query.get("whitelistOnly") or parsed_query.get("whitelist") or [""])[0]
+			whitelist_only = str(wl_raw).strip().lower() in ("1", "true", "yes", "on")
 			out = []
 			for item in raw_bucket:
+				if whitelist_only and not self._deezer_raw_item_quiz_whitelist_artist_ok(item):
+					continue
 				rec = self._deezer_track_to_suggest_dict(item)
 				if not rec:
 					continue
@@ -2614,24 +2649,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 			tracks = self._fetch_deezer_tracks(DEEZER_POLISH_HIPHOP_QUERY, max(limit * 2, 30), polish_only=True)
 			random.shuffle(tracks)
 			self.json_response({"tracks": tracks[:limit]}, 200)
-		except Exception as ex:
-			self.json_response({"error": str(ex)}, 500)
-
-	def handle_quiz_music_type_post(self):
-		try:
-			self._ensure_round_started()
-			self._ensure_quiz_state()
-			length = int(self.headers.get("Content-Length", "0"))
-			raw = self.rfile.read(length)
-			parsed = json.loads(raw.decode("utf-8"))
-			if not isinstance(parsed, dict):
-				self.json_response({"error": "Payload must be an object"}, 400)
-				return
-			name = self._sanitize_name(parsed.get("name"), "")
-			if not self._is_video_controller(name):
-				self.json_response({"error": "Only sobik can set quiz music type"}, 403)
-				return
-			self.json_response({"error": "Ustawianie typu muzyki jest wylaczone."}, 403)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
@@ -2750,7 +2767,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not self._is_video_controller(name):
 				self.json_response({"error": "Only sobik can start quiz round"}, 403)
 				return
-			# Najważniejsze: start reczny bez Gotowy; auto-start przy zapisie typu przez _maybe_auto_start_quiz_when_all_ready.
+			# Najważniejsze: start reczny bez Gotowy; auto-start gdy wszyscy gotowi (_maybe_auto_start_quiz_when_all_ready).
 			if not self._start_quiz_round_with_random_track():
 				if self._quiz_round_limit_reached():
 					self.json_response({"error": "Osiagnieto limit rund quizu (zwieksz limit lub zapisz ponownie)"}, 400)
@@ -2792,6 +2809,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 				n = 9999
 			BUZZER_STATE["quiz_round_limit"] = n
 			BUZZER_STATE["quiz_rounds_played"] = 0
+			BUZZER_STATE["quiz_used_track_ids"] = []
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:

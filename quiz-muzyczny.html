@@ -1140,7 +1140,7 @@
 				return;
 			}
 			try {
-				const data = await fetchJson("/api/deezer-search?q=" + encodeURIComponent(term) + "&limit=18");
+				const data = await fetchJson("/api/deezer-search?q=" + encodeURIComponent(term) + "&limit=18&whitelistOnly=1");
 				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
 				if (!tracks.length) {
 					hideGuessSuggest();
@@ -1320,44 +1320,6 @@
 			});
 		}
 
-		function playRevealChorusHint(durationSec) {
-			// Najważniejsze: w 30s preview Deezer nie ma API „refrenu” — bierzemy ostatnie N sekund próbki (często hook/refren).
-			const onMeta = () => {
-				quizAudio.removeEventListener("loadedmetadata", onMeta);
-				let d = quizAudio.duration;
-				if (!Number.isFinite(d) || d <= 0) {
-					d = 30;
-				}
-				const dur = Math.max(0.001, Number(durationSec) || 1);
-				let start = Math.max(0, d - dur);
-				if (start + dur > d) {
-					start = Math.max(0, d - dur);
-				}
-				try {
-					quizAudio.currentTime = start;
-				} catch (err1) {
-					try {
-						quizAudio.currentTime = 0;
-					} catch (err2) {
-						start = 0;
-					}
-				}
-				quizAudio.play().then(() => {
-					clipStopTimer = setTimeout(() => {
-						stopCurrentClip();
-					}, dur * 1000);
-					startClipProgress(start, dur, true);
-				}).catch(() => {
-					setStatus("nie mozna odtworzyc ujawnienia");
-				});
-			};
-			if (quizAudio.readyState >= 1) {
-				onMeta();
-			} else {
-				quizAudio.addEventListener("loadedmetadata", onMeta);
-			}
-		}
-
 		async function playQuizClipFromState(state) {
 			const previewUrl = String(state.quizPreviewUrl || "").trim();
 			const reveal = Boolean(state.quizRevealActive);
@@ -1407,10 +1369,7 @@
 			}
 			applyVolume();
 			try {
-				if (reveal && seekMiddle) {
-					playRevealChorusHint(durationSec);
-					return;
-				}
+				// Najważniejsze: zawsze od początku próbki (bez „końcówki/refrenu”).
 				await seekQuizAudioToStart();
 				await quizAudio.play();
 				startClipProgress(0, durationSec, Boolean(reveal));
@@ -1482,7 +1441,6 @@
 			currentQuizWrongGuesses = state.quizWrongGuesses || {};
 			currentQuizGuessHistory = state.quizGuessHistory || {};
 			const revealOn = Boolean(state.quizRevealActive);
-			const revealChorusMode = revealOn && Boolean(state.quizRevealSeekMiddle);
 			if (isAdmin() && document.activeElement !== quizRoundLimitInput) {
 				const limSync = Number(state.quizRoundLimit || 0);
 				if (Number.isFinite(limSync)) {
@@ -1513,7 +1471,7 @@
 					html = "";
 				}
 				revealPanel.innerHTML = html;
-				revealPanel.classList.toggle("reveal-chorus", revealChorusMode);
+				revealPanel.classList.remove("reveal-chorus");
 				revealPanel.classList.remove("hidden");
 			} else {
 				revealPanel.innerHTML = "";
