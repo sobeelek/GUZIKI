@@ -3,6 +3,7 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<link rel="icon" href="data:," />
 	<title>Quiz muzyczny Deezer</title>
 	<style>
 		:root {
@@ -46,11 +47,6 @@
 		h1 {
 			margin: 0 0 6px;
 			font-size: 28px;
-		}
-
-		.info {
-			margin: 0 0 14px;
-			color: #d1d5db;
 		}
 
 		.me {
@@ -115,8 +111,7 @@
 		}
 
 		.phase-actions,
-		.score-actions,
-		.bottom-actions {
+		.score-actions {
 			display: grid;
 			gap: 8px;
 		}
@@ -126,10 +121,6 @@
 		}
 
 		.score-actions {
-			grid-template-columns: 1fr 1fr;
-		}
-
-		.bottom-actions {
 			grid-template-columns: 1fr 1fr;
 		}
 
@@ -169,6 +160,71 @@
 		.wrong-guess-panel li {
 			margin: 4px 0;
 			word-break: break-word;
+		}
+
+		.guess-history-panel {
+			margin: 10px 0 0;
+			padding: 10px 12px;
+			border-radius: 12px;
+			border: 1px solid #4b5563;
+			background: #0f172a;
+			font-size: 14px;
+			line-height: 1.45;
+			color: #e5e7eb;
+		}
+
+		.guess-history-panel--below-actions {
+			margin-top: 14px;
+		}
+
+		.guess-history-panel ol {
+			margin: 0;
+			padding-left: 1.35em;
+		}
+
+		.guess-history-panel li {
+			margin: 4px 0;
+			word-break: break-word;
+		}
+
+		.guess-hist-item {
+			list-style-position: outside;
+			padding: 10px 10px 10px 12px;
+			border-left: 4px solid #4b5563;
+			border-radius: 10px;
+			margin: 8px 0;
+		}
+
+		.guess-hist-item--artist_hint {
+			border-left-color: #eab308;
+			background: rgba(234, 179, 8, 0.12);
+		}
+
+		.guess-hist-item--wrong {
+			border-left-color: #dc2626;
+			background: rgba(220, 38, 38, 0.12);
+		}
+
+		.guess-hist-item--correct {
+			border-left-color: #22c55e;
+			background: rgba(34, 197, 94, 0.14);
+		}
+
+		.guess-hist-line {
+			margin: 2px 0;
+			font-size: 14px;
+		}
+
+		.guess-hist-lbl {
+			display: inline-block;
+			min-width: 4.5em;
+			color: #9ca3af;
+			font-size: 12px;
+			font-weight: 600;
+		}
+
+		.guess-hist-plain {
+			font-size: 14px;
 		}
 
 		.status,
@@ -290,10 +346,23 @@
 		}
 
 		.guess-row {
-			display: grid;
-			grid-template-columns: 1fr auto;
-			gap: 10px;
-			align-items: center;
+			display: block;
+		}
+
+		.guess-row input {
+			width: 100%;
+			box-sizing: border-box;
+		}
+
+		.guess-form {
+			margin: 0;
+		}
+
+		.quiz-phase-badge {
+			margin: 8px 0 6px;
+			font-size: 14px;
+			font-weight: 600;
+			color: #93c5fd;
 		}
 
 		.reveal-panel {
@@ -305,6 +374,46 @@
 			font-weight: 700;
 			text-align: center;
 			color: #ecfdf5;
+		}
+
+		.reveal-panel .reveal-title-line {
+			font-size: 24px;
+			font-weight: 800;
+			line-height: 1.25;
+			color: #ecfdf5;
+			word-break: break-word;
+		}
+
+		.reveal-panel .reveal-artist-line {
+			margin-top: 8px;
+			font-size: 17px;
+			font-weight: 600;
+			color: #bbf7d0;
+		}
+
+		.quiz-progress-wrap {
+			margin-top: 6px;
+			display: grid;
+			gap: 4px;
+		}
+
+		.quiz-progress-track {
+			height: 10px;
+			border-radius: 999px;
+			background: #0b1220;
+			border: 1px solid #374151;
+			overflow: hidden;
+		}
+
+		.quiz-progress-fill {
+			height: 100%;
+			width: 0%;
+			border-radius: 999px;
+			background: linear-gradient(90deg, #2563eb, #38bdf8);
+		}
+
+		.quiz-progress-fill.reveal {
+			background: linear-gradient(90deg, #059669, #34d399);
 		}
 
 		@media (max-width: 960px) {
@@ -324,28 +433,30 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Zasada: fazy 1 s / 3 s / 8 s / 14 s fragmentu od poczatku preview Deezer (coraz mniej punktow). Zla odpowiedz (bez trafienia artysty) = koniec zgadywania w tej piosence, lista prob na czerwono. Podpowiedz: wpisz fragment — propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta — dopisz tytul. Po ostatniej fazie lub gdy wszyscy trafia: ujawnienie ~10 s ze srodka + podpis, potem Gotowy i nastepna piosenka.</p>
 			<p class="me" id="meInfo"></p>
-			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
 
 			<div id="adminMusicSetup" class="section hidden">
-				<label for="musicPreset">Typ muzyki (Deezer)</label>
+				<label for="musicPreset">Typ</label>
 				<select id="musicPreset"></select>
 				<div id="customMusicWrap" class="hidden">
-					<input id="customMusicInput" type="text" placeholder="Wpisz zapytanie do Deezer" />
+					<input id="customMusicInput" type="text" placeholder="Zapytanie" />
 				</div>
 				<button id="saveMusicTypeBtn" class="main">Zapisz typ</button>
 			</div>
 			<div id="adminRoundControls" class="phase-actions hidden">
-				<button id="startRoundBtn">Start recznie (gdy auto nie zaskoczy)</button>
+				<button id="startRoundBtn">Start</button>
 				<button id="nextPhaseBtn">Nastepna faza</button>
 				<button id="autoToggleBtn">Auto: ON</button>
 				<button id="stopClipBtn">Stop klipu</button>
 			</div>
 
 			<div class="section">
-				<p id="quizPlaybackInfo" class="quiz-state">Czekam na komende odtworzenia fragmentu...</p>
+				<div id="quizProgressWrap" class="quiz-progress-wrap">
+					<div class="quiz-progress-track" aria-hidden="true">
+						<div id="quizProgressFill" class="quiz-progress-fill"></div>
+					</div>
+				</div>
 				<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;">
 					<span>Glosnosc</span>
 					<input id="volumeRange" type="range" min="0" max="100" step="1" value="100" />
@@ -353,21 +464,19 @@
 				</div>
 			</div>
 
-			<button id="readyBtn">Gotowy: NIE</button>
+			<p id="quizPhaseBadge" class="quiz-phase-badge hidden" aria-live="polite"></p>
 			<div class="guess-autocomplete-wrap">
-				<div class="guess-row">
-					<input id="guessInput" type="text" placeholder="Artysta - tytul (podpowiedz z Deezer)" autocomplete="off" />
-					<button id="guessSubmitBtn" class="main">Sprawdz</button>
-				</div>
+				<form id="guessForm" class="guess-form" action="#" method="post">
+					<div class="guess-row">
+						<input id="guessInput" name="guess" type="text" placeholder="Artysta - tytul (Enter)" autocomplete="off" disabled />
+					</div>
+				</form>
 				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
 			</div>
-			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na kolejna faze (1s/3s/8s/14s).</p>
+			<p id="result" class="result"></p>
 			<div id="wrongGuessPanel" class="wrong-guess-panel hidden" aria-live="polite"></div>
 
-			<div class="bottom-actions">
-				<button id="resetBtn">Reset rundy</button>
-				<button id="changeBtn">Zmien gracza</button>
-			</div>
+			<div id="guessHistoryPanel" class="guess-history-panel guess-history-panel--below-actions hidden" aria-live="polite"></div>
 			<p id="status" class="status">Status: laczenie...</p>
 		</div>
 
@@ -377,7 +486,7 @@
 		</aside>
 	</div>
 
-	<audio id="quizAudio" preload="auto"></audio>
+	<audio id="quizAudio" preload="auto" playsinline></audio>
 
 	<script>
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
@@ -385,7 +494,6 @@
 		const MAX_PLAYERS = 8;
 		const AUTO_PHASE_DELAY_MS = 700;
 		const meInfo = document.getElementById("meInfo");
-		const musicTypeLine = document.getElementById("musicTypeLine");
 		const revealPanel = document.getElementById("revealPanel");
 		const adminMusicSetup = document.getElementById("adminMusicSetup");
 		const adminRoundControls = document.getElementById("adminRoundControls");
@@ -399,15 +507,14 @@
 		const stopClipBtn = document.getElementById("stopClipBtn");
 		const volumeRange = document.getElementById("volumeRange");
 		const volumeLabel = document.getElementById("volumeLabel");
-		const quizPlaybackInfo = document.getElementById("quizPlaybackInfo");
+		const quizProgressFill = document.getElementById("quizProgressFill");
+		const guessForm = document.getElementById("guessForm");
 		const guessInput = document.getElementById("guessInput");
-		const guessSubmitBtn = document.getElementById("guessSubmitBtn");
+		const quizPhaseBadge = document.getElementById("quizPhaseBadge");
 		const guessSuggestList = document.getElementById("guessSuggestList");
-		const readyBtn = document.getElementById("readyBtn");
 		const result = document.getElementById("result");
+		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
 		const wrongGuessPanel = document.getElementById("wrongGuessPanel");
-		const resetBtn = document.getElementById("resetBtn");
-		const changeBtn = document.getElementById("changeBtn");
 		const statusEl = document.getElementById("status");
 		const myScore = document.getElementById("myScore");
 		const scoreboard = document.getElementById("scoreboard");
@@ -424,18 +531,23 @@
 		let lastStateUpdateMs = 0;
 		let localVolume = 100;
 		let lastQuizCommandToken = 0;
+		let lastQuizListenTokenMine = 0;
 		let clipStopTimer = null;
+		let clipProgressRaf = null;
+		let clipProgressWindowStartSec = 0;
+		let clipProgressWindowDurSec = 1;
 		let autoAdvanceEnabled = true;
 		let autoAdvanceTimer = null;
-		let myReady = false;
 		let currentArtistHints = {};
 		let currentQuizWrong = {};
 		let currentQuizWrongGuesses = {};
+		let currentQuizGuessHistory = {};
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
+		let musicPresetDirty = false;
 
 		const MUSIC_PRESETS = [
-			{ value: "hip hop [2022-2026]", label: "Hip hop 2022-2026" },
+			{ value: "hiphop_years_2022_2026", label: "Polski rap / hip-hop (2022-2026)" },
 			{ value: "polski hip hop", label: "Polski hip hop" },
 			{ value: "polska muzyka", label: "Polska muzyka" },
 			{ value: "rock", label: "Rock" },
@@ -457,12 +569,38 @@
 		}
 		function buildApiUrl(path) { return String(API_BASE_URL || "").replace(/\/+$/, "") + path; }
 		function normalizeName(value) { return String(value || "").trim().toLowerCase(); }
+		function isDefaultSlotName(player, name) {
+			return normalizeName(name) === normalizeName("Gracz " + player);
+		}
+		function reconcileMyNameFromServer(state) {
+			if (!isValidPlayer(myPlayer) || !state || !state.playerNames) {
+				return;
+			}
+			const key = String(myPlayer);
+			const raw = state.playerNames[key];
+			if (raw === undefined || raw === null) {
+				return;
+			}
+			const serverName = safeName(String(raw), myPlayer);
+			const srvDef = isDefaultSlotName(myPlayer, serverName);
+			const locDef = isDefaultSlotName(myPlayer, myName);
+			if (srvDef && !locDef) {
+				setStatus("sesja nieaktualna — wybierz gracza ponownie");
+				setTimeout(goToNickChoice, 600);
+				return;
+			}
+			if (normalizeName(serverName) !== normalizeName(myName)) {
+				myName = serverName;
+				localStorage.setItem(getStorageKey("name"), myName);
+				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
+				updateAdminUi();
+			}
+		}
 		function isAdmin() { return normalizeName(myName) === VIDEO_CONTROLLER_NAME; }
 		function setStatus(text) { statusEl.textContent = "Status: " + text; }
 		function toIntScore(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
 		function clampVolume(value) { const n = Number(value); if (!Number.isFinite(n)) { return 100; } return Math.max(0, Math.min(100, Math.round(n))); }
 		function goToNickChoice() { window.location.href = "wybor-ksywy.html"; }
-		function goToModeChoice() { window.location.href = "wybor-trybu.html"; }
 		function getVolumeStorageKey() { return getStorageKey("quiz_volume"); }
 
 		function updateAdminUi() {
@@ -478,8 +616,16 @@
 			musicPreset.innerHTML = opts.join("");
 		}
 
+		function canonicalMusicQueryKey(q) {
+			const s = String(q || "").trim();
+			if (s === "hip hop [2022-2026]" || s === "hiphop_2022_2026") {
+				return "hiphop_years_2022_2026";
+			}
+			return s;
+		}
+
 		function syncMusicControlsFromQuery(queryText) {
-			const q = String(queryText || "").trim();
+			const q = canonicalMusicQueryKey(String(queryText || "").trim());
 			let matched = false;
 			for (let i = 0; i < MUSIC_PRESETS.length; i = i + 1) {
 				const p = MUSIC_PRESETS[i];
@@ -511,7 +657,7 @@
 			}
 			const query = readMusicQueryFromUi();
 			if (!query) {
-				setStatus("wpisz typ muzyki");
+				setStatus("brak typu");
 				return;
 			}
 			try {
@@ -520,15 +666,13 @@
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ name: myName, query: query })
 				});
+				musicPresetDirty = false;
 				updateByState(data.state);
-				setStatus("zapisano typ muzyki");
+				setStatus("OK");
 			} catch (err) {
-				setStatus("blad zapisu typu");
+				const msg = err && err.message ? String(err.message) : "blad zapisu typu";
+				setStatus(msg);
 			}
-		}
-
-		function updateReadyUi() {
-			readyBtn.textContent = myReady ? "Gotowy: TAK" : "Gotowy: NIE";
 		}
 
 		function isPlayerGuessed(player) {
@@ -550,6 +694,61 @@
 				.replace(/</g, "&lt;")
 				.replace(/"/g, "&quot;")
 				.replace(/'/g, "&#39;");
+		}
+
+		function guessHistoryEntryText(entry) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.text !== undefined) {
+				return String(entry.text || "").trim();
+			}
+			return String(entry || "").trim();
+		}
+
+		function guessHistoryEntryKind(entry) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.kind) {
+				const k = String(entry.kind);
+				if (k === "artist_hint") {
+					return "artist_hint";
+				}
+				if (k === "correct") {
+					return "correct";
+				}
+				return "wrong";
+			}
+			return "wrong";
+		}
+
+		function formatGuessTitleArtistHtml(raw) {
+			const s = String(raw || "").trim();
+			const parts = s.split(/\s+-\s+/);
+			if (parts.length >= 2) {
+				const utwor = parts[0].trim();
+				const artysta = parts.slice(1).join(" - ").trim();
+				return (
+					'<div class="guess-hist-pair">' +
+					'<div class="guess-hist-line"><span class="guess-hist-lbl">Utwor:</span> ' +
+					escapeHtml(utwor) +
+					"</div>" +
+					'<div class="guess-hist-line"><span class="guess-hist-lbl">Artysta:</span> ' +
+					escapeHtml(artysta) +
+					"</div></div>"
+				);
+			}
+			return '<div class="guess-hist-plain">' + escapeHtml(s) + "</div>";
+		}
+
+		function formatGuessHistoryListItem(entry) {
+			const raw = guessHistoryEntryText(entry);
+			const kind = guessHistoryEntryKind(entry);
+			let cssKind = "wrong";
+			if (kind === "artist_hint") {
+				cssKind = "artist_hint";
+			} else if (kind === "correct") {
+				cssKind = "correct";
+			}
+			const body = formatGuessTitleArtistHtml(raw);
+			return (
+				'<li class="guess-hist-item guess-hist-item--' + cssKind + '">' + body + "</li>"
+			);
 		}
 
 		function buildAvatarHtml(key, displayName) {
@@ -662,6 +861,9 @@
 						}
 						guessInput.value = String(picked.label || "");
 						hideGuessSuggest();
+						if (String(guessInput.value || "").trim().length >= 3) {
+							markGuess();
+						}
 					});
 				});
 			} catch (err) {
@@ -680,40 +882,161 @@
 			return data || {};
 		}
 
+		function stopClipProgress() {
+			if (clipProgressRaf !== null) {
+				cancelAnimationFrame(clipProgressRaf);
+				clipProgressRaf = null;
+			}
+			quizProgressFill.style.width = "0%";
+			quizProgressFill.classList.remove("reveal");
+		}
+
+		function startClipProgress(windowStartSec, windowDurSec, isRevealPhase) {
+			stopClipProgress();
+			clipProgressWindowStartSec = Number(windowStartSec) || 0;
+			clipProgressWindowDurSec = Math.max(0.001, Number(windowDurSec) || 1);
+			if (isRevealPhase) {
+				quizProgressFill.classList.add("reveal");
+			}
+			function tick() {
+				clipProgressRaf = null;
+				if (!quizAudio) {
+					return;
+				}
+				const dur = clipProgressWindowDurSec;
+				let elapsed = (Number(quizAudio.currentTime) || 0) - clipProgressWindowStartSec;
+				if (!Number.isFinite(elapsed)) {
+					elapsed = 0;
+				}
+				let p = elapsed / dur;
+				if (p < 0) {
+					p = 0;
+				}
+				if (p > 1) {
+					p = 1;
+				}
+				quizProgressFill.style.width = (p * 100) + "%";
+				if (p < 1 && !quizAudio.paused) {
+					clipProgressRaf = requestAnimationFrame(tick);
+				}
+			}
+			clipProgressRaf = requestAnimationFrame(tick);
+		}
+
 		function stopCurrentClip() {
 			if (clipStopTimer) {
 				clearTimeout(clipStopTimer);
 				clipStopTimer = null;
 			}
+			stopClipProgress();
 			quizAudio.pause();
 			try { quizAudio.currentTime = 0; } catch (err) { return; }
 		}
 
-		function playRevealFromMiddle(durationSec) {
+		function normalizedAudioUrl(u) {
+			const s = String(u || "").trim();
+			if (!s) {
+				return "";
+			}
+			try {
+				return new URL(s, document.baseURI).href;
+			} catch (err) {
+				return s;
+			}
+		}
+
+		function quizAudioUrlsMatch(currentRaw, nextRaw) {
+			const a = normalizedAudioUrl(currentRaw);
+			const b = normalizedAudioUrl(nextRaw);
+			return a !== "" && b !== "" && a === b;
+		}
+
+		function waitQuizAudioCanPlay() {
+			return new Promise(function (resolve, reject) {
+				if (quizAudio.readyState >= 2) {
+					resolve();
+					return;
+				}
+				const onOk = function () {
+					cleanup();
+					resolve();
+				};
+				const onBad = function () {
+					cleanup();
+					reject(new Error("brak audio"));
+				};
+				function cleanup() {
+					quizAudio.removeEventListener("canplay", onOk);
+					quizAudio.removeEventListener("error", onBad);
+				}
+				quizAudio.addEventListener("canplay", onOk, { once: true });
+				quizAudio.addEventListener("error", onBad, { once: true });
+			});
+		}
+
+		function seekQuizAudioToStart() {
+			// Najważniejsze: kazda faza zgadywania i kazda nowa piosenka — zawsze od początku pliku preview (nie od srodka).
+			return new Promise(function (resolve) {
+				let settled = false;
+				function fin() {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					try {
+						quizAudio.removeEventListener("seeked", fin);
+					} catch (e0) {}
+					resolve();
+				}
+				try {
+					quizAudio.pause();
+				} catch (e1) {}
+				try {
+					if (typeof quizAudio.fastSeek === "function") {
+						try {
+							quizAudio.fastSeek(0);
+						} catch (e2) {
+							quizAudio.currentTime = 0;
+						}
+					} else {
+						quizAudio.currentTime = 0;
+					}
+				} catch (e3) {
+					fin();
+					return;
+				}
+				quizAudio.addEventListener("seeked", fin, { once: true });
+				window.setTimeout(fin, 120);
+			});
+		}
+
+		function playRevealChorusHint(durationSec) {
+			// Najważniejsze: w 30s preview Deezer nie ma API „refrenu” — bierzemy ostatnie N sekund próbki (często hook/refren).
 			const onMeta = () => {
 				quizAudio.removeEventListener("loadedmetadata", onMeta);
 				let d = quizAudio.duration;
 				if (!Number.isFinite(d) || d <= 0) {
 					d = 30;
 				}
-				let start = d / 2 - 5;
-				if (start < 0) {
-					start = 0;
-				}
-				if (start + durationSec > d) {
-					start = Math.max(0, d - durationSec);
+				const dur = Math.max(0.001, Number(durationSec) || 1);
+				let start = Math.max(0, d - dur);
+				if (start + dur > d) {
+					start = Math.max(0, d - dur);
 				}
 				try {
 					quizAudio.currentTime = start;
 				} catch (err1) {
 					try {
 						quizAudio.currentTime = 0;
-					} catch (err2) {}
+					} catch (err2) {
+						start = 0;
+					}
 				}
 				quizAudio.play().then(() => {
 					clipStopTimer = setTimeout(() => {
 						stopCurrentClip();
-					}, durationSec * 1000);
+					}, dur * 1000);
+					startClipProgress(start, dur, true);
 				}).catch(() => {
 					setStatus("nie mozna odtworzyc ujawnienia");
 				});
@@ -727,32 +1050,65 @@
 
 		async function playQuizClipFromState(state) {
 			const previewUrl = String(state.quizPreviewUrl || "").trim();
-			const durationSec = Number(state.quizCommandDurationSec || 0);
 			const reveal = Boolean(state.quizRevealActive);
 			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
-			if (!previewUrl || durationSec <= 0) {
+			let durationSec = Number(state.quizCommandDurationSec || 0);
+			if (!previewUrl) {
 				return;
 			}
-			if (!reveal && !seekMiddle && isPlayerGuessed(myPlayer)) {
+			if (!reveal && !seekMiddle) {
+				if (isPlayerGuessed(myPlayer)) {
+					return;
+				}
+				if (isQuizWrong(myPlayer)) {
+					return;
+				}
+				const durs = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
+				const lpMap = state.quizListenPhases || {};
+				let idx = Number(lpMap[String(myPlayer)]);
+				if (!Number.isFinite(idx)) {
+					idx = 0;
+				}
+				idx = Math.max(0, Math.min(Math.floor(idx), durs.length - 1));
+				const tier = Number(durs[idx]);
+				if (Number.isFinite(tier) && tier > 0) {
+					durationSec = tier;
+				}
+			}
+			if (durationSec <= 0) {
 				return;
 			}
 			stopCurrentClip();
-			if (quizAudio.src !== previewUrl) {
+			const curSrc = quizAudio.currentSrc || quizAudio.src || "";
+			if (!quizAudioUrlsMatch(curSrc, previewUrl)) {
 				quizAudio.src = previewUrl;
+				try {
+					quizAudio.load();
+				} catch (errLoad) {
+					return;
+				}
+				try {
+					await waitQuizAudioCanPlay();
+				} catch (errWait) {
+					const msg = errWait && errWait.message ? String(errWait.message) : "blad ladowania audio";
+					setStatus(msg);
+					return;
+				}
 			}
 			applyVolume();
 			try {
 				if (reveal && seekMiddle) {
-					playRevealFromMiddle(durationSec);
+					playRevealChorusHint(durationSec);
 					return;
 				}
-				quizAudio.currentTime = 0;
+				await seekQuizAudioToStart();
 				await quizAudio.play();
+				startClipProgress(0, durationSec, Boolean(reveal));
 				clipStopTimer = setTimeout(() => {
 					stopCurrentClip();
 				}, durationSec * 1000);
 			} catch (err) {
-				setStatus("nie mozna odtworzyc fragmentu");
+				setStatus("nie mozna odtworzyc fragmentu (autoplay lub format)");
 			}
 		}
 
@@ -786,13 +1142,14 @@
 				return;
 			}
 			const roundActive = Boolean(state.quizRoundActive);
-			const guessedCount = Number(state.quizGuessedCount || 0);
+			const revealOn = Boolean(state.quizRevealActive);
+			const finishedCount = Number(state.quizFinishedCount || 0);
 			const occupiedCount = Number(state.quizOccupiedCount || 0);
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
-			if (!roundActive || phaseIndex < 0) {
+			if (!roundActive || revealOn || phaseIndex < 0) {
 				return;
 			}
-			if (occupiedCount > 0 && guessedCount >= occupiedCount) {
+			if (occupiedCount > 0 && finishedCount >= occupiedCount) {
 				return;
 			}
 			const currentDuration = Number(state.quizCommandDurationSec || 0);
@@ -806,84 +1163,106 @@
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			reconcileMyNameFromServer(state);
 			currentPlayerAvatars = state.playerAvatars || {};
 			lastStateUpdateMs = Number(state.lastUpdateMs || 0);
 			currentGuessed = state.quizGuessedPlayers || {};
 			currentArtistHints = state.quizArtistHintPlayers || {};
 			currentQuizWrong = state.quizWrongPlayers || {};
 			currentQuizWrongGuesses = state.quizWrongGuesses || {};
-			const readyPlayers = state.quizReadyPlayers || {};
-			myReady = Boolean(readyPlayers[String(myPlayer)]);
+			currentQuizGuessHistory = state.quizGuessHistory || {};
 			const revealOn = Boolean(state.quizRevealActive);
+			const revealChorusMode = revealOn && Boolean(state.quizRevealSeekMiddle);
 			const mq = String(state.quizMusicQuery || "").trim();
-			musicTypeLine.textContent = "Typ muzyki (losowo z Deezer): " + (mq || "(brak)");
-			if (isAdmin()) {
+			if (isAdmin() && !musicPresetDirty) {
 				syncMusicControlsFromQuery(mq);
 			}
 			if (revealOn) {
 				const ans = String(state.quizTrackLabel || "").trim();
 				const art = String(state.quizTrackArtist || "").trim();
 				const tit = String(state.quizTrackTitle || "").trim();
-				let line = ans;
-				if (!line && (art || tit)) {
-					line = tit + (art ? " — " + art : "");
+				let html = "";
+				if (tit || art) {
+					html =
+						(tit ? '<div class="reveal-title-line">' + escapeHtml(tit) + "</div>" : "") +
+						(art ? '<div class="reveal-artist-line">' + escapeHtml(art) + "</div>" : "");
+				} else if (ans) {
+					html = '<div class="reveal-title-line">' + escapeHtml(ans) + "</div>";
+				} else {
+					html = "";
 				}
-				revealPanel.textContent = line ? ("To bylo: " + line) : "Koniec rundy — sluchaj ujawnienia.";
+				revealPanel.innerHTML = html;
+				revealPanel.classList.toggle("reveal-chorus", revealChorusMode);
 				revealPanel.classList.remove("hidden");
 			} else {
-				revealPanel.textContent = "";
+				revealPanel.innerHTML = "";
+				revealPanel.classList.remove("reveal-chorus");
 				revealPanel.classList.add("hidden");
 			}
 			const roundOn = Boolean(state.quizRoundActive);
 			const myWrong = isQuizWrong(myPlayer);
-			const myWrongList = Array.isArray(currentQuizWrongGuesses[String(myPlayer)])
-				? currentQuizWrongGuesses[String(myPlayer)]
+			const myGuessHistory = Array.isArray(currentQuizGuessHistory[String(myPlayer)])
+				? currentQuizGuessHistory[String(myPlayer)]
 				: [];
-			guessSubmitBtn.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
-			guessInput.disabled = guessSubmitBtn.disabled;
+			if ((roundOn || revealOn) && myGuessHistory.length > 0) {
+				let histItems = "";
+				for (let hi = 0; hi < myGuessHistory.length; hi = hi + 1) {
+					histItems = histItems + formatGuessHistoryListItem(myGuessHistory[hi]);
+				}
+				guessHistoryPanel.innerHTML = "<ol>" + histItems + "</ol>";
+				guessHistoryPanel.classList.remove("hidden");
+			} else {
+				guessHistoryPanel.innerHTML = "";
+				guessHistoryPanel.classList.add("hidden");
+			}
+			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
+			const dursBadge = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
+			const lpMapB = state.quizListenPhases || {};
+			let idxB = Number(lpMapB[String(myPlayer)]);
+			if (!Number.isFinite(idxB)) {
+				idxB = 0;
+			}
+			idxB = Math.max(0, Math.min(Math.floor(idxB), dursBadge.length - 1));
+			const secB = Number(dursBadge[idxB]);
+			if (roundOn && !revealOn && !myWrong && !isPlayerGuessed(myPlayer) && Number.isFinite(secB)) {
+				quizPhaseBadge.textContent =
+					"Faza " +
+					String(idxB + 1) +
+					"/4 · do " +
+					String(secB) +
+					" s sluchu (max 4 proby / ostatnia 6 s)";
+				quizPhaseBadge.classList.remove("hidden");
+			} else {
+				quizPhaseBadge.textContent = "";
+				quizPhaseBadge.classList.add("hidden");
+			}
 			if (myWrong && roundOn) {
 				wrongGuessPanel.classList.remove("hidden");
-				let items = "";
-				for (let wi = 0; wi < myWrongList.length; wi = wi + 1) {
-					items = items + "<li>" + escapeHtml(String(myWrongList[wi])) + "</li>";
-				}
-				wrongGuessPanel.innerHTML =
-					"<strong>Zle — nie mozesz juz zgadywac w tej piosence. Czekaj na nastepna.</strong><ul>" +
-					items +
-					"</ul>";
-				result.textContent = "Bledna odpowiedz — koniec prob w tej rundzie.";
-				result.classList.add("bad");
+				wrongGuessPanel.innerHTML = "";
+				result.textContent = "";
+				result.classList.remove("bad");
 			} else {
 				wrongGuessPanel.classList.add("hidden");
 				wrongGuessPanel.innerHTML = "";
 				result.classList.remove("bad");
 				if (!roundOn && !revealOn) {
-					result.textContent = "Ustaw typ (sobik), potem Gotowy — startuje losowa piosenka.";
+					result.textContent = "";
 				} else if (roundOn) {
-					result.textContent = isPlayerGuessed(myPlayer)
-						? "Zgadles — czekasz na ujawnienie."
-						: "Sluchaj (fazy 1s/3s/8s/14s) i wpisz artyste oraz tytul.";
+					result.textContent = "";
 				} else if (revealOn) {
-					result.textContent = "Faza ujawnienia — sluchaj ~10s fragmentu ze srodka.";
+					result.textContent = "";
 				}
 			}
-			updateReadyUi();
-			const phaseIndex = Number(state.quizPhaseIndex || -1);
-			const phaseDuration = Number(state.quizCommandDurationSec || 0);
-			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [5, 3, 2, 1];
-			const readyCount = Number(state.quizReadyCount || 0);
-			const occupiedCount = Number(state.quizOccupiedCount || 0);
-			if (revealOn) {
-				quizPlaybackInfo.textContent = "Ujawnienie odpowiedzi (~" + phaseDuration + "s fragment). Gotowi do kolejnej rundy: " + readyCount + "/" + occupiedCount;
-			} else if (phaseIndex >= 0) {
-				const points = phaseIndex >= 0 && phaseIndex < phasePoints.length ? phasePoints[phaseIndex] : 0;
-				quizPlaybackInfo.textContent = "Faza " + (phaseIndex + 1) + ": " + phaseDuration + "s (" + points + " pkt), gotowi " + readyCount + "/" + occupiedCount;
-			} else {
-				quizPlaybackInfo.textContent = "Czekam na start (wszyscy Gotowy + typ)... gotowi " + readyCount + "/" + occupiedCount;
-			}
 			const token = Number(state.quizCommandToken || 0);
+			const ltMap = state.quizListenTokens || {};
+			const ltMine = Number(ltMap[String(myPlayer)] != null ? ltMap[String(myPlayer)] : 0);
+			const roundGuess = Boolean(state.quizRoundActive) && !Boolean(state.quizRevealActive);
 			if (token > lastQuizCommandToken) {
 				lastQuizCommandToken = token;
+				lastQuizListenTokenMine = ltMine;
+				playQuizClipFromState(state);
+			} else if (roundGuess && ltMine > lastQuizListenTokenMine) {
+				lastQuizListenTokenMine = ltMine;
 				playQuizClipFromState(state);
 			}
 			scheduleAutoAdvanceIfNeeded(state);
@@ -902,12 +1281,15 @@
 		}
 
 		async function markGuess() {
-			if (!myPlayer || isPlayerGuessed(myPlayer)) {
+			if (!myPlayer || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
+				return;
+			}
+			if (guessInput.disabled) {
 				return;
 			}
 			const text = String(guessInput.value || "").trim();
 			if (text.length < 3) {
-				setStatus("za krotka odpowiedz");
+				setStatus("za krotko");
 				return;
 			}
 			hideGuessSuggest();
@@ -920,29 +1302,19 @@
 				updateByState(data.state);
 				if (data.guessWrong) {
 					guessInput.value = "";
-					setStatus("zle — nastepna proba przy nastepnej piosence");
+					setStatus("zle");
 					return;
 				}
 				if (data.artistHintOnly) {
-					setStatus("Trafiony artysta — dopisz tytul (albo wybierz z listy)");
+					setStatus("OK");
 				} else {
 					guessInput.value = "";
-					setStatus("trafione");
+					setStatus("OK");
 				}
 			} catch (err) {
 				const msg = err && err.message ? String(err.message) : "blad";
 				setStatus(msg);
 				refreshState();
-			}
-		}
-
-		async function resetRound() {
-			try {
-				const data = await fetchJson("/api/buzzer-reset", { method: "POST" });
-				updateByState(data.state);
-				setStatus("online");
-			} catch (err) {
-				setStatus("blad resetu");
 			}
 		}
 
@@ -955,27 +1327,10 @@
 					body: JSON.stringify({ name: myName })
 				});
 				updateByState(data.state);
-				setStatus("start rundy (1s)");
+				setStatus("OK");
 			} catch (err) {
-				setStatus("blad startu rundy");
-			}
-		}
-
-		async function setReady(readyValue) {
-			try {
-				const data = await fetchJson("/api/quiz-ready", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						player: myPlayer,
-						name: myName,
-						ready: readyValue
-					})
-				});
-				updateByState(data.state);
-				setStatus(readyValue ? "jestes gotowy" : "usunieto gotowosc");
-			} catch (err) {
-				setStatus("blad ustawiania gotowosci");
+				const msg = err && err.message ? String(err.message) : "blad startu rundy";
+				setStatus(msg);
 			}
 		}
 
@@ -986,13 +1341,6 @@
 			const payload = JSON.stringify({ player: myPlayer, name: myName });
 			const blob = new Blob([payload], { type: "application/json" });
 			navigator.sendBeacon(buildApiUrl("/api/buzzer-leave"), blob);
-		}
-
-		async function leaveAndGoModeChoice() {
-			sendLeaveBeacon();
-			localStorage.removeItem(getStorageKey("player"));
-			localStorage.removeItem(getStorageKey("name"));
-			goToModeChoice();
 		}
 
 		function startPolling() {
@@ -1012,18 +1360,21 @@
 				loadVolume();
 				buildMusicPresetSelect();
 				updateAdminUi();
-				updateReadyUi();
 				startPolling();
 				refreshState();
 			}
 		}
 
 		musicPreset.addEventListener("change", () => {
+			musicPresetDirty = true;
 			if (musicPreset.value === "__custom__") {
 				customMusicWrap.classList.remove("hidden");
 			} else {
 				customMusicWrap.classList.add("hidden");
 			}
+		});
+		customMusicInput.addEventListener("input", () => {
+			musicPresetDirty = true;
 		});
 		saveMusicTypeBtn.addEventListener("click", saveMusicType);
 		startRoundBtn.addEventListener("click", startQuizRound);
@@ -1042,10 +1393,6 @@
 			localStorage.setItem(getVolumeStorageKey(), String(localVolume));
 			applyVolume();
 		});
-		readyBtn.addEventListener("click", () => {
-			setReady(!myReady);
-		});
-		guessSubmitBtn.addEventListener("click", markGuess);
 		guessInput.addEventListener("input", () => {
 			scheduleDeezerSuggest();
 		});
@@ -1058,13 +1405,10 @@
 			}
 			suggestHideTimer = setTimeout(hideGuessSuggest, 200);
 		});
-		guessInput.addEventListener("keydown", (event) => {
-			if (event.key === "Enter") {
-				markGuess();
-			}
+		guessForm.addEventListener("submit", (event) => {
+			event.preventDefault();
+			markGuess();
 		});
-		resetBtn.addEventListener("click", resetRound);
-		changeBtn.addEventListener("click", leaveAndGoModeChoice);
 		window.addEventListener("pagehide", sendLeaveBeacon);
 	</script>
 </body>

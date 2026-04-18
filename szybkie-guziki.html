@@ -154,13 +154,6 @@
 			color: #9ca3af;
 		}
 
-		.actions {
-			margin-top: 14px;
-			display: flex;
-			justify-content: center;
-			gap: 10px;
-		}
-
 		.status {
 			margin-top: 8px;
 			font-size: 13px;
@@ -402,10 +395,6 @@
 				</div>
 				<button id="buzzerBtn" class="big-buzzer">KLIK</button>
 				<p class="result" id="result">Czekam na pierwszy klik...</p>
-				<div class="actions">
-					<button id="resetBtn">Reset rundy</button>
-					<button id="changeBtn">Zmien gracza</button>
-				</div>
 			</div>
 			<p id="status" class="status">Status: laczenie...</p>
 		</div>
@@ -426,8 +415,6 @@
 		const videoControls = document.getElementById("videoControls");
 		const buzzerBtn = document.getElementById("buzzerBtn");
 		const result = document.getElementById("result");
-		const resetBtn = document.getElementById("resetBtn");
-		const changeBtn = document.getElementById("changeBtn");
 		const statusEl = document.getElementById("status");
 		const ytInput = document.getElementById("ytInput");
 		const setVideoBtn = document.getElementById("setVideoBtn");
@@ -483,6 +470,37 @@
 
 		function isVideoController() {
 			return normalizeName(myName) === VIDEO_CONTROLLER_NAME;
+		}
+
+		function isDefaultSlotName(player, name) {
+			return normalizeName(name) === normalizeName("Gracz " + player);
+		}
+
+		function reconcileMyNameFromServer(state) {
+			if (!isValidPlayer(myPlayer) || !state || !state.playerNames) {
+				return;
+			}
+			const key = String(myPlayer);
+			const raw = state.playerNames[key];
+			if (raw === undefined || raw === null) {
+				return;
+			}
+			const serverName = safeName(String(raw), myPlayer);
+			const srvDef = isDefaultSlotName(myPlayer, serverName);
+			const locDef = isDefaultSlotName(myPlayer, myName);
+			if (srvDef && !locDef) {
+				setStatus("sesja nieaktualna — wybierz gracza ponownie");
+				setTimeout(goToSetupView, 600);
+				return;
+			}
+			if (normalizeName(serverName) !== normalizeName(myName)) {
+				myName = serverName;
+				localStorage.setItem(getStorageKey("name"), myName);
+				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
+				updateVideoLockUi();
+				updateVideoControlsUi();
+				updateAdminActionsUi();
+			}
 		}
 
 		function isValidPlayer(player) {
@@ -865,6 +883,7 @@
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			reconcileMyNameFromServer(state);
 			currentPlayerAvatars = state.playerAvatars || {};
 			lastStateUpdateMs = Number(state.lastUpdateMs || 0);
 			currentVideoTimeSec = Number(state.videoTimeSec || 0);
@@ -939,18 +958,6 @@
 			} catch (err) {
 				buzzerBtn.disabled = false;
 				setStatus("blad wyslania klikniecia");
-			}
-		}
-
-		async function resetRound() {
-			try {
-				const data = await fetchJson("/api/buzzer-reset", {
-					method: "POST"
-				});
-				updateByState(data.state);
-				setStatus("online");
-			} catch (err) {
-				setStatus("blad resetu");
 			}
 		}
 
@@ -1030,28 +1037,7 @@
 			pollTimer = setInterval(refreshState, 300);
 		}
 
-		function leaveGame() {
-			const leavingPlayer = myPlayer;
-			const leavingName = myName;
-			myPlayer = null;
-			myName = "";
-			localStorage.removeItem(getStorageKey("player"));
-			localStorage.removeItem(getStorageKey("name"));
-			leavePlayerServer(leavingPlayer, leavingName);
-			stopVideoSyncLoop();
-			if (pollTimer) {
-				clearInterval(pollTimer);
-				pollTimer = null;
-			}
-			updateVideoLockUi();
-			updateVideoControlsUi();
-			setStatus("offline");
-			goToSetupView();
-		}
-
 		buzzerBtn.addEventListener("click", clickBuzzer);
-		resetBtn.addEventListener("click", resetRound);
-		changeBtn.addEventListener("click", leaveGame);
 		goodBtn.addEventListener("click", () => {
 			updateScore(1);
 		});
