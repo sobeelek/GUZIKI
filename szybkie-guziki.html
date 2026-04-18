@@ -174,6 +174,53 @@
 			font-size: 14px;
 			padding: 12px;
 		}
+
+		.score-controls {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			gap: 8px;
+		}
+
+		.good-btn {
+			background: #059669;
+		}
+
+		.bad-btn {
+			background: #dc2626;
+		}
+
+		.my-score {
+			margin: 0;
+			font-size: 18px;
+			font-weight: 700;
+		}
+
+		.scoreboard {
+			border: 1px solid #374151;
+			border-radius: 12px;
+			overflow: hidden;
+		}
+
+		.score-row {
+			display: grid;
+			grid-template-columns: 1fr auto;
+			padding: 8px 10px;
+			gap: 8px;
+			background: #0f172a;
+			border-bottom: 1px solid #1f2937;
+		}
+
+		.score-row:last-child {
+			border-bottom: 0;
+		}
+
+		.score-row.me-row {
+			background: #172554;
+		}
+
+		.score-points {
+			font-weight: 700;
+		}
 	</style>
 </head>
 <body>
@@ -211,6 +258,12 @@
 			<div class="video-wrap" id="videoWrap">
 				<div class="video-empty">Brak filmu - wklej link YouTube.</div>
 			</div>
+			<div class="score-controls">
+				<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
+				<button id="badBtn" class="bad-btn">Zle (-1)</button>
+			</div>
+			<p class="my-score" id="myScore">Twoje punkty: 0</p>
+			<div id="scoreboard" class="scoreboard"></div>
 			<button id="buzzerBtn" class="big-buzzer">KLIK</button>
 			<p class="result" id="result">Czekam na pierwszy klik...</p>
 			<div class="actions">
@@ -240,6 +293,10 @@
 		const ytInput = document.getElementById("ytInput");
 		const setVideoBtn = document.getElementById("setVideoBtn");
 		const videoWrap = document.getElementById("videoWrap");
+		const goodBtn = document.getElementById("goodBtn");
+		const badBtn = document.getElementById("badBtn");
+		const myScore = document.getElementById("myScore");
+		const scoreboard = document.getElementById("scoreboard");
 
 		let myPlayer = null;
 		let myName = "";
@@ -247,6 +304,8 @@
 		let pollTimer = null;
 		let currentVideoUrl = "";
 		let isVideoPaused = false;
+		let currentScores = {};
+		let currentPlayerNames = {};
 
 		function getStorageKey(prefix) {
 			return "buzzer_" + prefix;
@@ -271,6 +330,51 @@
 
 		function setStatus(text) {
 			statusEl.textContent = "Status: " + text;
+		}
+
+		function toIntScore(value) {
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed)) {
+				return 0;
+			}
+			return Math.trunc(parsed);
+		}
+
+		function getPlayerNameFromState(player) {
+			const key = String(player);
+			const savedName = currentPlayerNames[key];
+			if (savedName && String(savedName).trim().length > 0) {
+				return String(savedName);
+			}
+			return "Gracz " + player;
+		}
+
+		function renderScoreboard() {
+			const rows = [];
+			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
+				const key = String(i);
+				const points = toIntScore(currentScores[key]);
+				const name = getPlayerNameFromState(i);
+				const rowClass = i === myPlayer ? "score-row me-row" : "score-row";
+				rows.push(
+					'<div class="' +
+						rowClass +
+						'"><span>' +
+						name +
+						' (P' +
+						i +
+						')</span><span class="score-points">' +
+						points +
+						"</span></div>"
+				);
+			}
+			scoreboard.innerHTML = rows.join("");
+			if (myPlayer && isValidPlayer(myPlayer)) {
+				const myPoints = toIntScore(currentScores[String(myPlayer)]);
+				myScore.textContent = "Twoje punkty: " + myPoints;
+				return;
+			}
+			myScore.textContent = "Twoje punkty: 0";
 		}
 
 		function extractYouTubeId(urlValue) {
@@ -368,6 +472,8 @@
 
 		function updateByState(state) {
 			currentState = state;
+			currentScores = state.scores || {};
+			currentPlayerNames = state.playerNames || {};
 			const winner = state.winner;
 			const winnerName = state.winnerName || ("Gracz " + winner);
 			const winnerTime = state.winnerTimeMs;
@@ -380,6 +486,7 @@
 			if (winner === null) {
 				result.textContent = "Czekam na pierwszy klik...";
 				buzzerBtn.disabled = false;
+				renderScoreboard();
 				return;
 			}
 
@@ -388,6 +495,7 @@
 			if (Number(winner) === Number(myPlayer)) {
 				buzzerBtn.classList.add("winner");
 			}
+			renderScoreboard();
 		}
 
 		async function fetchJson(url, options) {
@@ -478,6 +586,55 @@
 			}
 		}
 
+		async function updateScore(delta) {
+			if (!myPlayer || !isValidPlayer(myPlayer)) {
+				return;
+			}
+			goodBtn.disabled = true;
+			badBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/buzzer-score", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						player: myPlayer,
+						name: myName,
+						delta: delta
+					})
+				});
+				updateByState(data.state);
+				setStatus("punkty zaktualizowane");
+			} catch (err) {
+				setStatus("blad zmiany punktow");
+			} finally {
+				goodBtn.disabled = false;
+				badBtn.disabled = false;
+			}
+		}
+
+		async function registerPlayer() {
+			if (!myPlayer || !isValidPlayer(myPlayer)) {
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/buzzer-join", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						player: myPlayer,
+						name: myName
+					})
+				});
+				updateByState(data.state);
+			} catch (err) {
+				setStatus("blad rejestracji gracza");
+			}
+		}
+
 		function startPolling() {
 			if (pollTimer) {
 				clearInterval(pollTimer);
@@ -497,6 +654,7 @@
 			persistIdentity();
 			setJoinedUi(true);
 			startPolling();
+			registerPlayer();
 			refreshState();
 		}
 
@@ -515,6 +673,12 @@
 		buzzerBtn.addEventListener("click", clickBuzzer);
 		resetBtn.addEventListener("click", resetRound);
 		changeBtn.addEventListener("click", leaveGame);
+		goodBtn.addEventListener("click", () => {
+			updateScore(1);
+		});
+		badBtn.addEventListener("click", () => {
+			updateScore(-1);
+		});
 		setVideoBtn.addEventListener("click", setVideo);
 		ytInput.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") {
@@ -539,6 +703,7 @@
 		if (window.location.hostname.indexOf("github.io") !== -1 && API_BASE_URL.indexOf("127.0.0.1") !== -1) {
 			setStatus("ustaw poprawny API_BASE_URL do zdalnego backendu");
 		}
+		renderScoreboard();
 	</script>
 </body>
 </html>

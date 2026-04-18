@@ -16,6 +16,14 @@ CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
 MAX_PLAYERS = 8
 
+
+def _default_scores():
+	return {str(i): 0 for i in range(1, MAX_PLAYERS + 1)}
+
+
+def _default_player_names():
+	return {str(i): "Gracz %d" % i for i in range(1, MAX_PLAYERS + 1)}
+
 BUZZER_STATE = {
 	"round_id": 1,
 	"round_started_ms": 0,
@@ -24,6 +32,8 @@ BUZZER_STATE = {
 	"winner_time_ms": None,
 	"video_url": "",
 	"video_paused": False,
+	"scores": _default_scores(),
+	"player_names": _default_player_names(),
 	"last_update_ms": 0,
 }
 
@@ -99,6 +109,15 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return text[:20]
 		return text
 
+	def _sanitize_delta(self, value):
+		try:
+			delta = int(value)
+		except Exception:
+			return None
+		if delta not in (-1, 1):
+			return None
+		return delta
+
 	def _new_round(self):
 		BUZZER_STATE["round_id"] = BUZZER_STATE["round_id"] + 1
 		BUZZER_STATE["round_started_ms"] = self._now_ms()
@@ -112,7 +131,22 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if BUZZER_STATE["round_started_ms"] == 0:
 			self._new_round()
 
+	def _ensure_scores_and_names(self):
+		scores = BUZZER_STATE.get("scores")
+		if not isinstance(scores, dict):
+			BUZZER_STATE["scores"] = _default_scores()
+		names = BUZZER_STATE.get("player_names")
+		if not isinstance(names, dict):
+			BUZZER_STATE["player_names"] = _default_player_names()
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in BUZZER_STATE["scores"]:
+				BUZZER_STATE["scores"][key] = 0
+			if key not in BUZZER_STATE["player_names"]:
+				BUZZER_STATE["player_names"][key] = "Gracz %d" % i
+
 	def _public_buzzer_state(self):
+		self._ensure_scores_and_names()
 		return {
 			"roundId": BUZZER_STATE["round_id"],
 			"roundStartedMs": BUZZER_STATE["round_started_ms"],
@@ -121,6 +155,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"winnerTimeMs": BUZZER_STATE["winner_time_ms"],
 			"videoUrl": BUZZER_STATE["video_url"],
 			"videoPaused": BUZZER_STATE["video_paused"],
+			"scores": BUZZER_STATE["scores"],
+			"playerNames": BUZZER_STATE["player_names"],
 			"lastUpdateMs": BUZZER_STATE["last_update_ms"],
 		}
 
@@ -151,6 +187,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-video":
 			self.handle_buzzer_video_post()
+			return
+		if parsed.path == "/api/buzzer-score":
+			self.handle_buzzer_score_post()
+			return
+		if parsed.path == "/api/buzzer-join":
+			self.handle_buzzer_join_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -199,6 +241,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def handle_buzzer_click_post(self):
 		try:
 			self._ensure_round_started()
+			self._ensure_scores_and_names()
 			length = int(self.headers.get("Content-Length", "0"))
 			raw = self.rfile.read(length)
 			parsed = json.loads(raw.decode("utf-8"))
@@ -212,6 +255,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return
 
 			player_name = self._sanitize_name(parsed.get("name"), "Gracz %d" % player)
+			BUZZER_STATE["player_names"][str(player)] = player_name
 			if BUZZER_STATE["winner"] is not None:
 				self.json_response(
 					{
@@ -265,6 +309,55 @@ class AppHandler(SimpleHTTPRequestHandler):
 			video_url = str(parsed.get("videoUrl", "")).strip()
 			BUZZER_STATE["video_url"] = video_url
 			BUZZER_STATE["video_paused"] = False
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_score_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			player = self._sanitize_player(parsed.get("player"))
+			if player is None:
+				self.json_response({"error": "Invalid player number"}, 400)
+				return
+			delta = self._sanitize_delta(parsed.get("delta"))
+			if delta is None:
+				self.json_response({"error": "Invalid delta"}, 400)
+				return
+			player_name = self._sanitize_name(parsed.get("name"), "Gracz %d" % player)
+			key = str(player)
+			# Najważniejsze: punkty zapisujemy globalnie na serwerze, żeby kazdy klient widzial ten sam ranking.
+			BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + delta
+			BUZZER_STATE["player_names"][key] = player_name
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_join_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			player = self._sanitize_player(parsed.get("player"))
+			if player is None:
+				self.json_response({"error": "Invalid player number"}, 400)
+				return
+			player_name = self._sanitize_name(parsed.get("name"), "Gracz %d" % player)
+			BUZZER_STATE["player_names"][str(player)] = player_name
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
