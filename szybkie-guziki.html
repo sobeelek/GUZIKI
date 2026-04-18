@@ -107,6 +107,25 @@
 			gap: 14px;
 		}
 
+		.game-layout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 280px;
+			gap: 14px;
+			align-items: start;
+		}
+
+		.game-main {
+			display: grid;
+			gap: 14px;
+		}
+
+		.game-sidebar {
+			display: grid;
+			gap: 10px;
+			position: sticky;
+			top: 12px;
+		}
+
 		.big-buzzer {
 			padding: 34px 10px;
 			font-size: clamp(34px, 10vw, 84px);
@@ -187,7 +206,6 @@
 			font-weight: 700;
 			color: #f3f4f6;
 			background: rgba(15, 23, 42, 0.7);
-			backdrop-filter: blur(2px);
 			z-index: 2;
 			pointer-events: all;
 		}
@@ -238,6 +256,16 @@
 		.score-points {
 			font-weight: 700;
 		}
+
+		@media (max-width: 960px) {
+			.game-layout {
+				grid-template-columns: 1fr;
+			}
+
+			.game-sidebar {
+				position: static;
+			}
+		}
 	</style>
 </head>
 <body>
@@ -247,19 +275,6 @@
 
 		<div id="setupView" class="setup">
 			<div class="field">
-				<label for="playerSelect">Twoj numer gracza</label>
-				<select id="playerSelect">
-					<option value="1">Gracz 1</option>
-					<option value="2">Gracz 2</option>
-					<option value="3">Gracz 3</option>
-					<option value="4">Gracz 4</option>
-					<option value="5">Gracz 5</option>
-					<option value="6">Gracz 6</option>
-					<option value="7">Gracz 7</option>
-					<option value="8">Gracz 8</option>
-				</select>
-			</div>
-			<div class="field">
 				<label for="nickInput">Twoja ksywka</label>
 				<input id="nickInput" type="text" maxlength="20" value="" placeholder="np. Kosa" />
 			</div>
@@ -267,28 +282,34 @@
 		</div>
 
 		<div id="gameView" class="buzzer-area hidden">
-			<p class="me" id="meInfo"></p>
-			<div class="video-controls">
-				<input id="ytInput" type="text" placeholder="Wklej link YouTube (watch, youtu.be, shorts)" />
-				<button id="setVideoBtn">Ustaw film</button>
-			</div>
-			<div class="video-wrap" id="videoWrap">
-				<div id="videoStage">
-					<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+			<div class="game-layout">
+				<div class="game-main">
+					<p class="me" id="meInfo"></p>
+					<div id="videoControls" class="video-controls">
+						<input id="ytInput" type="text" placeholder="Wklej link YouTube (watch, youtu.be, shorts)" />
+						<button id="setVideoBtn">Ustaw film</button>
+					</div>
+					<div class="video-wrap" id="videoWrap">
+						<div id="videoStage">
+							<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+						</div>
+						<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
+					</div>
+					<div class="score-controls">
+						<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
+						<button id="badBtn" class="bad-btn">Zle (-1)</button>
+					</div>
+					<button id="buzzerBtn" class="big-buzzer">KLIK</button>
+					<p class="result" id="result">Czekam na pierwszy klik...</p>
+					<div class="actions">
+						<button id="resetBtn">Reset rundy</button>
+						<button id="changeBtn">Zmien gracza</button>
+					</div>
 				</div>
-				<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
-			</div>
-			<div class="score-controls">
-				<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
-				<button id="badBtn" class="bad-btn">Zle (-1)</button>
-			</div>
-			<p class="my-score" id="myScore">Twoje punkty: 0</p>
-			<div id="scoreboard" class="scoreboard"></div>
-			<button id="buzzerBtn" class="big-buzzer">KLIK</button>
-			<p class="result" id="result">Czekam na pierwszy klik...</p>
-			<div class="actions">
-				<button id="resetBtn">Reset rundy</button>
-				<button id="changeBtn">Zmien gracza</button>
+				<div class="game-sidebar">
+					<p class="my-score" id="myScore">Twoje punkty: 0</p>
+					<div id="scoreboard" class="scoreboard"></div>
+				</div>
 			</div>
 			<p id="status" class="status">Status: laczenie...</p>
 		</div>
@@ -302,10 +323,10 @@
 
 		const setupView = document.getElementById("setupView");
 		const gameView = document.getElementById("gameView");
-		const playerSelect = document.getElementById("playerSelect");
 		const nickInput = document.getElementById("nickInput");
 		const joinBtn = document.getElementById("joinBtn");
 		const meInfo = document.getElementById("meInfo");
+		const videoControls = document.getElementById("videoControls");
 		const buzzerBtn = document.getElementById("buzzerBtn");
 		const result = document.getElementById("result");
 		const resetBtn = document.getElementById("resetBtn");
@@ -448,6 +469,10 @@
 
 		function updateVideoLockUi() {
 			videoLockOverlay.classList.toggle("hidden", isVideoController());
+		}
+
+		function updateVideoControlsUi() {
+			videoControls.classList.toggle("hidden", !isVideoController());
 		}
 
 		function ensureYouTubeApi() {
@@ -616,23 +641,33 @@
 			videoSyncTimer = null;
 		}
 
+		function isGameView() {
+			const params = new URLSearchParams(window.location.search);
+			return params.get("view") === "game";
+		}
+
+		function goToGameView() {
+			window.location.href = "szybkie-guziki.html?view=game";
+		}
+
+		function goToSetupView() {
+			window.location.href = "szybkie-guziki.html";
+		}
+
 		function setJoinedUi(isJoined) {
 			setupView.classList.toggle("hidden", isJoined);
 			gameView.classList.toggle("hidden", !isJoined);
 		}
 
 		function persistIdentity() {
-			localStorage.setItem(getStorageKey("player"), String(myPlayer));
+			if (myPlayer && isValidPlayer(myPlayer)) {
+				localStorage.setItem(getStorageKey("player"), String(myPlayer));
+			}
 			localStorage.setItem(getStorageKey("name"), myName);
 		}
 
 		function restoreIdentity() {
-			const storedPlayer = localStorage.getItem(getStorageKey("player"));
 			const storedName = localStorage.getItem(getStorageKey("name"));
-			const storedPlayerNumber = Number(storedPlayer);
-			if (isValidPlayer(storedPlayerNumber)) {
-				playerSelect.value = storedPlayer;
-			}
 			if (storedName) {
 				nickInput.value = storedName;
 			}
@@ -652,6 +687,7 @@
 			}
 			isVideoPaused = Boolean(state.videoPaused);
 			updateVideoLockUi();
+			updateVideoControlsUi();
 			syncVideoState();
 
 			if (winner === null) {
@@ -728,6 +764,10 @@
 		}
 
 		async function setVideo() {
+			if (!isVideoController()) {
+				setStatus("tylko sobik moze ustawic film");
+				return;
+			}
 			const rawUrl = ytInput.value.trim();
 			if (!rawUrl) {
 				setStatus("wklej najpierw link YouTube");
@@ -745,6 +785,7 @@
 						"Content-Type": "application/json"
 					},
 					body: JSON.stringify({
+						name: myName,
 						videoUrl: rawUrl
 					})
 				});
@@ -785,24 +826,28 @@
 			}
 		}
 
-		async function registerPlayer() {
-			if (!myPlayer || !isValidPlayer(myPlayer)) {
-				return;
-			}
+		async function registerPlayerAuto() {
 			try {
-				const data = await fetchJson("/api/buzzer-join", {
+				const data = await fetchJson("/api/buzzer-join-auto", {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json"
 					},
 					body: JSON.stringify({
-						player: myPlayer,
 						name: myName
 					})
 				});
+				const assignedPlayer = Number(data.player);
+				if (!isValidPlayer(assignedPlayer)) {
+					setStatus("blad przydzialu gracza");
+					return false;
+				}
+				myPlayer = assignedPlayer;
 				updateByState(data.state);
+				return true;
 			} catch (err) {
 				setStatus("blad rejestracji gracza");
+				return false;
 			}
 		}
 
@@ -813,27 +858,28 @@
 			pollTimer = setInterval(refreshState, 300);
 		}
 
-		function joinGame() {
-			const playerValue = playerSelect.value;
-			const player = Number(playerValue);
-			if (!isValidPlayer(player)) {
+		async function joinGame() {
+			const normalized = String(nickInput.value || "").trim();
+			if (!normalized) {
+				setStatus("wpisz ksywke");
 				return;
 			}
-			myPlayer = player;
-			myName = safeName(nickInput.value, player);
+			myName = safeName(normalized, 1);
+			joinBtn.disabled = true;
+			const registered = await registerPlayerAuto();
+			joinBtn.disabled = false;
+			if (!registered) {
+				return;
+			}
 			meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
 			persistIdentity();
-			setJoinedUi(true);
-			updateVideoLockUi();
-			startPolling();
-			startVideoSyncLoop();
-			registerPlayer();
-			refreshState();
+			goToGameView();
 		}
 
 		function leaveGame() {
 			myPlayer = null;
 			myName = "";
+			localStorage.removeItem(getStorageKey("player"));
 			stopVideoSyncLoop();
 			if (pollTimer) {
 				clearInterval(pollTimer);
@@ -841,7 +887,9 @@
 			}
 			setJoinedUi(false);
 			updateVideoLockUi();
+			updateVideoControlsUi();
 			setStatus("offline");
+			goToSetupView();
 		}
 
 		joinBtn.addEventListener("click", joinGame);
@@ -862,23 +910,34 @@
 		});
 
 		restoreIdentity();
-		if (nickInput.value.trim().length === 0) {
-			const player = Number(playerSelect.value);
-			nickInput.value = "Gracz " + player;
-		}
-		playerSelect.addEventListener("change", () => {
-			const player = Number(playerSelect.value);
-			const value = nickInput.value.trim();
-			if (value.length > 0) {
-				return;
+		if (!isGameView()) {
+			setJoinedUi(false);
+			if (nickInput.value.trim().length === 0) {
+				nickInput.value = "";
 			}
-			nickInput.value = "Gracz " + player;
-		});
+		} else {
+			const storedPlayer = Number(localStorage.getItem(getStorageKey("player")));
+			const storedName = String(localStorage.getItem(getStorageKey("name")) || "").trim();
+			if (!isValidPlayer(storedPlayer) || !storedName) {
+				goToSetupView();
+			} else {
+				myPlayer = storedPlayer;
+				myName = safeName(storedName, storedPlayer);
+				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
+				setJoinedUi(true);
+				updateVideoLockUi();
+				updateVideoControlsUi();
+				startPolling();
+				startVideoSyncLoop();
+				refreshState();
+			}
+		}
 
 		if (window.location.hostname.indexOf("github.io") !== -1 && API_BASE_URL.indexOf("127.0.0.1") !== -1) {
 			setStatus("ustaw poprawny API_BASE_URL do zdalnego backendu");
 		}
 		updateVideoLockUi();
+		updateVideoControlsUi();
 		renderScoreboard();
 	</script>
 </body>

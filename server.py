@@ -25,6 +25,10 @@ def _default_scores():
 def _default_player_names():
 	return {str(i): "Gracz %d" % i for i in range(1, MAX_PLAYERS + 1)}
 
+
+def _default_name_for_player(player):
+	return "Gracz %d" % player
+
 BUZZER_STATE = {
 	"round_id": 1,
 	"round_started_ms": 0,
@@ -140,6 +144,28 @@ class AppHandler(SimpleHTTPRequestHandler):
 		text = str(name or "").strip().lower()
 		return text == VIDEO_CONTROLLER_NAME
 
+	def _is_default_player_name(self, player, name):
+		return str(name or "").strip() == _default_name_for_player(player)
+
+	def _find_player_by_name(self, name):
+		target = str(name or "").strip().lower()
+		if not target:
+			return None
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			current = str(BUZZER_STATE["player_names"].get(key, "")).strip().lower()
+			if current == target:
+				return i
+		return None
+
+	def _pick_free_player(self):
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(i))
+			if self._is_default_player_name(i, current_name):
+				return i
+		return 1
+
 	def _new_round(self):
 		BUZZER_STATE["round_id"] = BUZZER_STATE["round_id"] + 1
 		BUZZER_STATE["round_started_ms"] = self._now_ms()
@@ -217,6 +243,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-join":
 			self.handle_buzzer_join_post()
+			return
+		if parsed.path == "/api/buzzer-join-auto":
+			self.handle_buzzer_join_auto_post()
 			return
 		if parsed.path == "/api/buzzer-video-sync":
 			self.handle_buzzer_video_sync_post()
@@ -333,6 +362,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not isinstance(parsed, dict):
 				self.json_response({"error": "Payload must be an object"}, 400)
 				return
+			name = str(parsed.get("name", "")).strip()
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can set video"}, 403)
+				return
 			video_url = str(parsed.get("videoUrl", "")).strip()
 			BUZZER_STATE["video_url"] = video_url
 			BUZZER_STATE["video_paused"] = False
@@ -417,6 +450,39 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["player_names"][str(player)] = player_name
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_join_auto_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			raw_name = str(parsed.get("name", "")).strip()
+			if not raw_name:
+				self.json_response({"error": "Name is required"}, 400)
+				return
+			player_name = self._sanitize_name(raw_name, raw_name)
+			existing_player = self._find_player_by_name(player_name)
+			if existing_player is not None:
+				assigned_player = existing_player
+			else:
+				assigned_player = self._pick_free_player()
+			BUZZER_STATE["player_names"][str(assigned_player)] = player_name
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response(
+				{
+					"ok": True,
+					"player": assigned_player,
+					"state": self._public_buzzer_state(),
+				},
+				200,
+			)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
