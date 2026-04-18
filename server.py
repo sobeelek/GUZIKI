@@ -8,7 +8,8 @@ import re
 import sys
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.request import Request, urlopen
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -39,6 +40,11 @@ BUZZER_STATE = {
 	"video_url": "",
 	"video_paused": False,
 	"video_time_sec": 0.0,
+	"quiz_preview_url": "",
+	"quiz_track_label": "",
+	"quiz_command_token": 0,
+	"quiz_command_duration_sec": 0,
+	"quiz_command_issued_ms": 0,
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
 	"last_update_ms": 0,
@@ -141,6 +147,15 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return value
 		return None
 
+	def _sanitize_duration_sec(self, value):
+		try:
+			duration = int(value)
+		except Exception:
+			return None
+		if duration < 1 or duration > 30:
+			return None
+		return duration
+
 	def _is_video_controller(self, name):
 		text = str(name or "").strip().lower()
 		return text == VIDEO_CONTROLLER_NAME
@@ -180,6 +195,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 		BUZZER_STATE["winner_name"] = ""
 		BUZZER_STATE["winner_time_ms"] = None
 		BUZZER_STATE["video_paused"] = False
+		BUZZER_STATE["quiz_command_duration_sec"] = 0
+		BUZZER_STATE["quiz_command_issued_ms"] = 0
 		BUZZER_STATE["last_update_ms"] = self._now_ms()
 
 	def _ensure_round_started(self):
@@ -211,6 +228,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"videoUrl": BUZZER_STATE["video_url"],
 			"videoPaused": BUZZER_STATE["video_paused"],
 			"videoTimeSec": BUZZER_STATE["video_time_sec"],
+			"quizPreviewUrl": BUZZER_STATE["quiz_preview_url"],
+			"quizTrackLabel": BUZZER_STATE["quiz_track_label"],
+			"quizCommandToken": BUZZER_STATE["quiz_command_token"],
+			"quizCommandDurationSec": BUZZER_STATE["quiz_command_duration_sec"],
+			"quizCommandIssuedMs": BUZZER_STATE["quiz_command_issued_ms"],
 			"videoControllerName": VIDEO_CONTROLLER_NAME,
 			"scores": BUZZER_STATE["scores"],
 			"playerNames": BUZZER_STATE["player_names"],
@@ -225,6 +247,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if parsed.path == "/api/buzzer-state":
 			self._ensure_round_started()
 			self.json_response(self._public_buzzer_state(), 200)
+			return
+		if parsed.path == "/api/deezer-search":
+			self.handle_deezer_search_get(parsed.query)
 			return
 		super().do_GET()
 
@@ -259,6 +284,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-leave":
 			self.handle_buzzer_leave_post()
+			return
+		if parsed.path == "/api/quiz-track":
+			self.handle_quiz_track_post()
+			return
+		if parsed.path == "/api/quiz-play":
+			self.handle_quiz_play_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -527,6 +558,108 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["player_names"][key] = _default_name_for_player(player)
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "released": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_deezer_search_get(self, query_text):
+		try:
+			parsed_query = parse_qs(query_text or "")
+			term = str((parsed_query.get("q") or [""])[0]).strip()
+			if not term:
+				self.json_response({"tracks": []}, 200)
+				return
+			limit_raw = str((parsed_query.get("limit") or ["15"])[0]).strip()
+			try:
+				limit = int(limit_raw)
+			except Exception:
+				limit = 15
+			if limit < 1:
+				limit = 1
+			if limit > 25:
+				limit = 25
+			url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": limit})
+			req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+			with urlopen(req, timeout=8) as response:
+				raw = response.read().decode("utf-8", errors="replace")
+			parsed = json.loads(raw)
+			items = parsed.get("data", [])
+			tracks = []
+			for item in items:
+				preview = str(item.get("preview") or "").strip()
+				if not preview:
+					continue
+				title = str(item.get("title") or "").strip()
+				artist_name = str((item.get("artist") or {}).get("name") or "").strip()
+				label = title
+				if artist_name:
+					label = title + " - " + artist_name
+				tracks.append(
+					{
+						"id": str(item.get("id") or ""),
+						"label": label[:120],
+						"previewUrl": preview,
+						"title": title[:80],
+						"artist": artist_name[:80],
+					}
+				)
+			self.json_response({"tracks": tracks}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_track_post(self):
+		try:
+			self._ensure_round_started()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can set quiz track"}, 403)
+				return
+			preview_url = str(parsed.get("previewUrl", "")).strip()
+			if not preview_url:
+				self.json_response({"error": "Missing previewUrl"}, 400)
+				return
+			label = str(parsed.get("label", "")).strip()
+			BUZZER_STATE["quiz_preview_url"] = preview_url
+			BUZZER_STATE["quiz_track_label"] = label[:120]
+			BUZZER_STATE["quiz_command_duration_sec"] = 0
+			BUZZER_STATE["quiz_command_issued_ms"] = 0
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_play_post(self):
+		try:
+			self._ensure_round_started()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can play quiz clip"}, 403)
+				return
+			if not str(BUZZER_STATE.get("quiz_preview_url", "")).strip():
+				self.json_response({"error": "No quiz track selected"}, 400)
+				return
+			duration_sec = self._sanitize_duration_sec(parsed.get("durationSec"))
+			if duration_sec is None:
+				self.json_response({"error": "Invalid durationSec"}, 400)
+				return
+			now_ms = self._now_ms()
+			# Najważniejsze: token komendy wymusza odtworzenie nowego klipu u wszystkich klientów.
+			BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
+			BUZZER_STATE["quiz_command_duration_sec"] = duration_sec
+			BUZZER_STATE["quiz_command_issued_ms"] = now_ms
+			BUZZER_STATE["last_update_ms"] = now_ms
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
