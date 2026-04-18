@@ -288,6 +288,7 @@ BUZZER_STATE = {
 	"quiz_round_limit": 0,
 	"quiz_rounds_played": 0,
 	"quiz_used_track_ids": [],
+	"quiz_session_id": 1,
 	"quiz_ready_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
@@ -445,6 +446,26 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return i
 		return 1
 
+	def _reset_full_quiz_session(self):
+		# Najważniejsze: zeruje punkty, limit rund, „już grane” utwory i stan quizu — nowy quizSessionId zsynchronizuje klientów (tokeny odsłuchu).
+		cancel_quiz_auto_next_timer()
+		self._ensure_quiz_state()
+		self._ensure_scores_and_names()
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			BUZZER_STATE["scores"][key] = 0
+		BUZZER_STATE["quiz_round_limit"] = 0
+		BUZZER_STATE["quiz_rounds_played"] = 0
+		qu = BUZZER_STATE.get("quiz_used_track_ids")
+		if not isinstance(qu, list):
+			BUZZER_STATE["quiz_used_track_ids"] = []
+		else:
+			qu[:] = []
+		BUZZER_STATE["quiz_reveal_pending_auto_next"] = False
+		BUZZER_STATE["quiz_session_id"] = int(BUZZER_STATE.get("quiz_session_id") or 1) + 1
+		self._new_round()
+		BUZZER_STATE["last_update_ms"] = self._now_ms()
+
 	def _new_round(self):
 		BUZZER_STATE["round_id"] = BUZZER_STATE["round_id"] + 1
 		BUZZER_STATE["round_started_ms"] = self._now_ms()
@@ -541,6 +562,33 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if cur == public_url:
 				return True
 		return False
+
+	def _assign_random_avatar_for_player_key(self, key):
+		# Najważniejsze: przy zajęciu slotu — losowy awatar z avatar_presets (gdy pole puste; bez kolizji z innymi zajętymi).
+		self._ensure_player_avatars()
+		k = str(key)
+		cur = str(BUZZER_STATE["player_avatars"].get(k, "")).strip()
+		if cur:
+			return
+		ensure_dirs()
+		all_presets = []
+		if os.path.isdir(AVATAR_PRESET_DIR):
+			for name in os.listdir(AVATAR_PRESET_DIR):
+				fn = self._sanitize_avatar_preset_filename(name)
+				if fn:
+					all_presets.append(fn)
+		if not all_presets:
+			return
+		random.shuffle(all_presets)
+		for fn in all_presets:
+			public_url = self._avatar_preset_public_url(fn)
+			if not self._is_avatar_preset_taken(public_url, k):
+				self._delete_legacy_uploaded_avatar_file(k)
+				BUZZER_STATE["player_avatars"][k] = public_url
+				return
+		fn = random.choice(all_presets)
+		self._delete_legacy_uploaded_avatar_file(k)
+		BUZZER_STATE["player_avatars"][k] = self._avatar_preset_public_url(fn)
 
 	def _delete_legacy_uploaded_avatar_file(self, key):
 		self._ensure_player_avatars()
@@ -641,6 +689,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_round_limit"] = 0
 		if "quiz_rounds_played" not in BUZZER_STATE:
 			BUZZER_STATE["quiz_rounds_played"] = 0
+		if "quiz_session_id" not in BUZZER_STATE:
+			BUZZER_STATE["quiz_session_id"] = 1
 		qu = BUZZER_STATE.get("quiz_used_track_ids")
 		if not isinstance(qu, list):
 			BUZZER_STATE["quiz_used_track_ids"] = []
@@ -1140,6 +1190,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizSkipsUsed": dict(BUZZER_STATE.get("quiz_skips_used") or {}),
 			"quizRoundLimit": int(BUZZER_STATE.get("quiz_round_limit") or 0),
 			"quizRoundsPlayed": int(BUZZER_STATE.get("quiz_rounds_played") or 0),
+			"quizSessionId": int(BUZZER_STATE.get("quiz_session_id") or 1),
 			"quizRoundsExhausted": bool(
 				int(BUZZER_STATE.get("quiz_round_limit") or 0) > 0
 				and int(BUZZER_STATE.get("quiz_rounds_played") or 0)
@@ -1620,6 +1671,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if parsed.path == "/api/quiz-round-limit":
 			self.handle_quiz_round_limit_post()
 			return
+		if parsed.path == "/api/quiz-full-reset":
+			self.handle_quiz_full_reset_post()
+			return
 		if parsed.path == "/api/quiz-next-phase":
 			self.handle_quiz_next_phase_post()
 			return
@@ -1844,6 +1898,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return
 			player_name = self._sanitize_name(parsed.get("name"), "Gracz %d" % player)
 			BUZZER_STATE["player_names"][str(player)] = player_name
+			self._assign_random_avatar_for_player_key(str(player))
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
@@ -1882,6 +1937,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_wrong_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_wrong_guesses"][str(assigned_player)] = []
 			BUZZER_STATE["quiz_guess_history"][str(assigned_player)] = []
+			self._assign_random_avatar_for_player_key(str(assigned_player))
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response(
 				{
@@ -2789,6 +2845,28 @@ class AppHandler(SimpleHTTPRequestHandler):
 					msg = "%s — %s" % (msg, detail[:220])
 				self.json_response({"error": msg}, 500)
 				return
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_full_reset_post(self):
+		# Najważniejsze: sobik — pełny reset quizu (punkty, limity, zawieszone tokeny); klient dostaje nowy quizSessionId.
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can reset the full quiz session"}, 403)
+				return
+			with BUZZER_QUIZ_LOCK:
+				self._ensure_round_started()
+				self._ensure_scores_and_names()
+				self._ensure_quiz_state()
+				self._reset_full_quiz_session()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)

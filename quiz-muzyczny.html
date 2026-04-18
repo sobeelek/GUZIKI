@@ -648,6 +648,7 @@
 				<button id="nextPhaseBtn">Nastepna faza</button>
 				<button id="autoToggleBtn">Auto: ON</button>
 				<button id="stopClipBtn">Stop klipu</button>
+				<button type="button" id="resetFullQuizBtn" title="Zeruje punkty, rundy i stan quizu (gdy cos sie zawiesi)">Reset calego quizu</button>
 			</div>
 
 			<div class="section">
@@ -725,6 +726,7 @@
 		const nextPhaseBtn = document.getElementById("nextPhaseBtn");
 		const autoToggleBtn = document.getElementById("autoToggleBtn");
 		const stopClipBtn = document.getElementById("stopClipBtn");
+		const resetFullQuizBtn = document.getElementById("resetFullQuizBtn");
 		const volumeRange = document.getElementById("volumeRange");
 		const volumeLabel = document.getElementById("volumeLabel");
 		const quizProgressFill = document.getElementById("quizProgressFill");
@@ -761,6 +763,7 @@
 		let localVolume = 25;
 		let lastQuizCommandToken = 0;
 		let lastQuizListenTokenMine = 0;
+		let lastQuizSessionId = 0;
 		let clipStopTimer = null;
 		let clipProgressRaf = null;
 		let clipProgressWindowStartSec = 0;
@@ -1473,6 +1476,12 @@
 		}
 
 		function updateByState(state) {
+			const qsId = Number(state.quizSessionId != null ? state.quizSessionId : 0);
+			if (Number.isFinite(qsId) && qsId > 0 && qsId !== lastQuizSessionId) {
+				lastQuizSessionId = qsId;
+				lastQuizCommandToken = 0;
+				lastQuizListenTokenMine = -1;
+			}
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
@@ -1717,6 +1726,34 @@
 			}
 		}
 
+		async function resetFullQuizSession() {
+			if (!isAdmin()) {
+				return;
+			}
+			if (!window.confirm("Zresetowac caly quiz? Punkty, limity i kolejka utworow wraca do zera.")) {
+				return;
+			}
+			resetFullQuizBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/quiz-full-reset", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name: myName })
+				});
+				updateByState(data.state);
+				try {
+					stopCurrentClip();
+				} catch (e0) {}
+				setStatus("Quiz zresetowany");
+			} catch (err) {
+				const msg = err && err.message ? String(err.message) : "blad resetu";
+				setStatus(msg);
+				refreshState();
+			} finally {
+				resetFullQuizBtn.disabled = false;
+			}
+		}
+
 		function sendLeaveBeacon() {
 			if (!isValidPlayer(myPlayer) || !myName || typeof navigator.sendBeacon !== "function") {
 				return;
@@ -1749,6 +1786,7 @@
 
 		saveRoundLimitBtn.addEventListener("click", saveRoundLimit);
 		startRoundBtn.addEventListener("click", startQuizRound);
+		resetFullQuizBtn.addEventListener("click", resetFullQuizSession);
 		nextPhaseBtn.addEventListener("click", requestNextPhase);
 		autoToggleBtn.addEventListener("click", () => {
 			autoAdvanceEnabled = !autoAdvanceEnabled;
