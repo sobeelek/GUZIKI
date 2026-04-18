@@ -67,12 +67,6 @@
 			gap: 8px;
 		}
 
-		.search-row {
-			display: grid;
-			grid-template-columns: 1fr auto;
-			gap: 8px;
-		}
-
 		input[type="text"],
 		input[type="range"] {
 			border: 1px solid #374151;
@@ -111,27 +105,13 @@
 			cursor: not-allowed;
 		}
 
-		.track-list {
-			max-height: 220px;
-			overflow: auto;
+		select {
 			border: 1px solid #374151;
 			border-radius: 10px;
-		}
-
-		.track-item {
-			width: 100%;
-			border: 0;
-			border-bottom: 1px solid #1f2937;
-			border-radius: 0;
-			text-align: left;
-			background: transparent;
-			padding: 10px;
-			color: #e5e7eb;
-			cursor: pointer;
-		}
-
-		.track-item:last-child {
-			border-bottom: 0;
+			background: #0b1220;
+			color: #f9fafb;
+			padding: 10px 12px;
+			font-size: 15px;
 		}
 
 		.phase-actions,
@@ -215,23 +195,24 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Fazy: 1s -> 3s -> 8s -> 16s. Tylko sobik steruje rundą i punktami.</p>
+			<p class="info">Fazy: 1s -> 3s -> 8s -> 16s. Sobik wybiera tylko typ muzyki (zapytanie Deezer); kazda runda to losowy utwor z tej puli.</p>
 			<p class="me" id="meInfo"></p>
+			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
+			<p id="sobikRoundTrack" class="quiz-state hidden"></p>
 
-			<div id="adminQuizSection" class="section hidden">
-				<div class="search-row">
-					<input id="searchInput" type="text" placeholder="Szukaj utworu w Deezer" />
-					<button id="searchBtn" class="main">Szukaj</button>
+			<div id="adminMusicSetup" class="section hidden">
+				<label for="musicPreset">Typ muzyki (Deezer)</label>
+				<select id="musicPreset"></select>
+				<div id="customMusicWrap" class="hidden">
+					<input id="customMusicInput" type="text" placeholder="Wpisz zapytanie do Deezer" />
 				</div>
-				<button id="loadPolishBtn">Wczytaj polski hiphop</button>
-				<div id="trackList" class="track-list"></div>
-				<p id="selectedTrackLabel" class="quiz-state">Wybrany utwor: brak</p>
-				<div class="phase-actions">
-					<button id="startRoundBtn">Start 1s</button>
-					<button id="nextPhaseBtn">Nastepna faza</button>
-					<button id="autoToggleBtn">Auto: ON</button>
-					<button id="stopClipBtn">Stop klipu</button>
-				</div>
+				<button id="saveMusicTypeBtn" class="main">Zapisz typ</button>
+			</div>
+			<div id="adminRoundControls" class="phase-actions hidden">
+				<button id="startRoundBtn">Start 1s</button>
+				<button id="nextPhaseBtn">Nastepna faza</button>
+				<button id="autoToggleBtn">Auto: ON</button>
+				<button id="stopClipBtn">Stop klipu</button>
 			</div>
 
 			<div class="section">
@@ -244,13 +225,9 @@
 			</div>
 
 			<button id="buzzerBtn" class="main" style="font-size:40px;padding:26px 10px;">KLIK</button>
+			<button id="readyBtn">Gotowy: NIE</button>
 			<button id="guessBtn" class="main">Zgadlem</button>
 			<p id="result" class="result">Czekam na pierwszy klik...</p>
-
-			<div id="adminScoreSection" class="score-actions hidden">
-				<button id="goodBtn" class="good">Dobrze (+1)</button>
-				<button id="badBtn" class="bad">Zle (-1)</button>
-			</div>
 
 			<div class="bottom-actions">
 				<button id="resetBtn">Reset rundy</button>
@@ -273,13 +250,14 @@
 		const MAX_PLAYERS = 8;
 		const AUTO_PHASE_DELAY_MS = 700;
 		const meInfo = document.getElementById("meInfo");
-		const adminQuizSection = document.getElementById("adminQuizSection");
-		const adminScoreSection = document.getElementById("adminScoreSection");
-		const searchInput = document.getElementById("searchInput");
-		const searchBtn = document.getElementById("searchBtn");
-		const loadPolishBtn = document.getElementById("loadPolishBtn");
-		const trackList = document.getElementById("trackList");
-		const selectedTrackLabel = document.getElementById("selectedTrackLabel");
+		const musicTypeLine = document.getElementById("musicTypeLine");
+		const sobikRoundTrack = document.getElementById("sobikRoundTrack");
+		const adminMusicSetup = document.getElementById("adminMusicSetup");
+		const adminRoundControls = document.getElementById("adminRoundControls");
+		const musicPreset = document.getElementById("musicPreset");
+		const customMusicWrap = document.getElementById("customMusicWrap");
+		const customMusicInput = document.getElementById("customMusicInput");
+		const saveMusicTypeBtn = document.getElementById("saveMusicTypeBtn");
 		const startRoundBtn = document.getElementById("startRoundBtn");
 		const nextPhaseBtn = document.getElementById("nextPhaseBtn");
 		const autoToggleBtn = document.getElementById("autoToggleBtn");
@@ -288,10 +266,9 @@
 		const volumeLabel = document.getElementById("volumeLabel");
 		const quizPlaybackInfo = document.getElementById("quizPlaybackInfo");
 		const buzzerBtn = document.getElementById("buzzerBtn");
+		const readyBtn = document.getElementById("readyBtn");
 		const guessBtn = document.getElementById("guessBtn");
 		const result = document.getElementById("result");
-		const goodBtn = document.getElementById("goodBtn");
-		const badBtn = document.getElementById("badBtn");
 		const resetBtn = document.getElementById("resetBtn");
 		const changeBtn = document.getElementById("changeBtn");
 		const statusEl = document.getElementById("status");
@@ -311,6 +288,20 @@
 		let clipStopTimer = null;
 		let autoAdvanceEnabled = true;
 		let autoAdvanceTimer = null;
+		let myReady = false;
+
+		const MUSIC_PRESETS = [
+			{ value: "polski hip hop", label: "Polski hip hop" },
+			{ value: "polska muzyka", label: "Polska muzyka" },
+			{ value: "rock", label: "Rock" },
+			{ value: "pop", label: "Pop" },
+			{ value: "metal", label: "Metal" },
+			{ value: "jazz", label: "Jazz" },
+			{ value: "electronic dance", label: "Electronic / dance" },
+			{ value: "hip hop", label: "Hip hop (ogolnie)" },
+			{ value: "classical", label: "Muzyka klasyczna" },
+			{ value: "__custom__", label: "Wlasne zapytanie" }
+		];
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
 		function isValidPlayer(player) { return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS; }
@@ -330,9 +321,69 @@
 		function getVolumeStorageKey() { return getStorageKey("quiz_volume"); }
 
 		function updateAdminUi() {
-			adminQuizSection.classList.toggle("hidden", !isAdmin());
-			adminScoreSection.classList.toggle("hidden", !isAdmin());
+			adminMusicSetup.classList.toggle("hidden", !isAdmin());
+			adminRoundControls.classList.toggle("hidden", !isAdmin());
 			autoToggleBtn.textContent = autoAdvanceEnabled ? "Auto: ON" : "Auto: OFF";
+		}
+
+		function buildMusicPresetSelect() {
+			const opts = MUSIC_PRESETS.map((p) => {
+				return '<option value="' + String(p.value).replace(/"/g, "&quot;") + '">' + p.label + "</option>";
+			});
+			musicPreset.innerHTML = opts.join("");
+		}
+
+		function syncMusicControlsFromQuery(queryText) {
+			const q = String(queryText || "").trim();
+			let matched = false;
+			for (let i = 0; i < MUSIC_PRESETS.length; i = i + 1) {
+				const p = MUSIC_PRESETS[i];
+				if (p.value !== "__custom__" && p.value === q) {
+					musicPreset.value = p.value;
+					matched = true;
+					break;
+				}
+			}
+			if (matched) {
+				customMusicWrap.classList.add("hidden");
+				return;
+			}
+			musicPreset.value = "__custom__";
+			customMusicInput.value = q;
+			customMusicWrap.classList.remove("hidden");
+		}
+
+		function readMusicQueryFromUi() {
+			if (musicPreset.value === "__custom__") {
+				return String(customMusicInput.value || "").trim();
+			}
+			return String(musicPreset.value || "").trim();
+		}
+
+		async function saveMusicType() {
+			if (!isAdmin()) {
+				return;
+			}
+			const query = readMusicQueryFromUi();
+			if (!query) {
+				setStatus("wpisz typ muzyki");
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-music-type", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name: myName, query: query })
+				});
+				updateByState(data.state);
+				setStatus("zapisano typ muzyki");
+			} catch (err) {
+				setStatus("blad zapisu typu");
+			}
+		}
+
+		function updateReadyUi() {
+			readyBtn.textContent = myReady ? "Gotowy: TAK" : "Gotowy: NIE";
 		}
 
 		function isPlayerGuessed(player) {
@@ -468,6 +519,8 @@
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
 			currentGuessed = state.quizGuessedPlayers || {};
+			const readyPlayers = state.quizReadyPlayers || {};
+			myReady = Boolean(readyPlayers[String(myPlayer)]);
 			const winner = state.winner;
 			const winnerName = state.winnerName || ("Gracz " + winner);
 			const winnerTime = state.winnerTimeMs;
@@ -479,14 +532,31 @@
 				buzzerBtn.disabled = true;
 			}
 			guessBtn.disabled = isPlayerGuessed(myPlayer) || !Boolean(state.quizRoundActive);
+			updateReadyUi();
+			const mq = String(state.quizMusicQuery || "").trim();
+			musicTypeLine.textContent = "Typ muzyki (losowo z Deezer): " + (mq || "(brak)");
+			if (isAdmin()) {
+				syncMusicControlsFromQuery(mq);
+			}
+			const roundOn = Boolean(state.quizRoundActive);
 			const selectedLabel = String(state.quizTrackLabel || "").trim();
-			selectedTrackLabel.textContent = "Wybrany utwor: " + (selectedLabel || "brak");
+			if (isAdmin() && roundOn && selectedLabel) {
+				sobikRoundTrack.textContent = "Podglad (sobik): teraz gra — " + selectedLabel;
+				sobikRoundTrack.classList.remove("hidden");
+			} else {
+				sobikRoundTrack.textContent = "";
+				sobikRoundTrack.classList.add("hidden");
+			}
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
 			const phaseDuration = Number(state.quizCommandDurationSec || 0);
+			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [5, 3, 2, 1];
+			const readyCount = Number(state.quizReadyCount || 0);
+			const occupiedCount = Number(state.quizOccupiedCount || 0);
 			if (phaseIndex >= 0) {
-				quizPlaybackInfo.textContent = "Faza " + (phaseIndex + 1) + ": " + phaseDuration + "s";
+				const points = phaseIndex >= 0 && phaseIndex < phasePoints.length ? phasePoints[phaseIndex] : 0;
+				quizPlaybackInfo.textContent = "Faza " + (phaseIndex + 1) + ": " + phaseDuration + "s (" + points + " pkt), gotowi " + readyCount + "/" + occupiedCount;
 			} else {
-				quizPlaybackInfo.textContent = "Czekam na komende odtworzenia fragmentu...";
+				quizPlaybackInfo.textContent = "Czekam na start sobik... gotowi " + readyCount + "/" + occupiedCount;
 			}
 			const token = Number(state.quizCommandToken || 0);
 			if (token > lastQuizCommandToken) {
@@ -553,84 +623,6 @@
 			}
 		}
 
-		async function updateScore(delta) {
-			if (!isAdmin()) { setStatus("punkty moze przyznawac tylko sobik"); return; }
-			const target = Number(currentState && currentState.winner);
-			if (!isValidPlayer(target)) { setStatus("najpierw ktos musi wygrac runde"); return; }
-			try {
-				const data = await fetchJson("/api/buzzer-score", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ name: myName, targetPlayer: target, delta: delta })
-				});
-				updateByState(data.state);
-				setStatus("punkty zaktualizowane");
-			} catch (err) {
-				setStatus("blad punktow");
-			}
-		}
-
-		function renderTrackList(items) {
-			if (!items.length) {
-				trackList.innerHTML = '<div class="track-item" style="cursor:default;">Brak wynikow</div>';
-				return;
-			}
-			const html = items.map((item, idx) => {
-				const label = String(item.label || "Utwor");
-				return '<button class="track-item" data-index="' + idx + '">' + label + "</button>";
-			});
-			trackList.innerHTML = html.join("");
-			const buttons = Array.from(trackList.querySelectorAll(".track-item"));
-			buttons.forEach((btn) => {
-				btn.addEventListener("click", async () => {
-					const index = Number(btn.dataset.index);
-					const selected = items[index];
-					if (!selected) { return; }
-					try {
-						const data = await fetchJson("/api/quiz-track", {
-							method: "POST",
-							headers: { "Content-Type": "application/json" },
-							body: JSON.stringify({
-								name: myName,
-								previewUrl: selected.previewUrl,
-								label: selected.label
-							})
-						});
-						updateByState(data.state);
-						setStatus("ustawiono utwor");
-					} catch (err) {
-						setStatus("blad ustawiania utworu");
-					}
-				});
-			});
-		}
-
-		async function searchTracks() {
-			if (!isAdmin()) { return; }
-			const term = String(searchInput.value || "").trim();
-			if (!term) { setStatus("wpisz fraze do szukania"); return; }
-			try {
-				const data = await fetchJson("/api/deezer-search?q=" + encodeURIComponent(term) + "&limit=20");
-				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-				renderTrackList(tracks);
-				setStatus("znaleziono " + tracks.length + " utworow");
-			} catch (err) {
-				setStatus("blad wyszukiwania deezer");
-			}
-		}
-
-		async function loadPolishHipHop() {
-			if (!isAdmin()) { return; }
-			try {
-				const data = await fetchJson("/api/deezer-polish-hiphop?limit=30");
-				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-				renderTrackList(tracks);
-				setStatus("wczytano polski hiphop: " + tracks.length + " utworow");
-			} catch (err) {
-				setStatus("blad wczytywania polskiego hiphopu");
-			}
-		}
-
 		async function startQuizRound() {
 			if (!isAdmin()) { return; }
 			try {
@@ -643,6 +635,24 @@
 				setStatus("start rundy 1s");
 			} catch (err) {
 				setStatus("blad startu rundy");
+			}
+		}
+
+		async function setReady(readyValue) {
+			try {
+				const data = await fetchJson("/api/quiz-ready", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						player: myPlayer,
+						name: myName,
+						ready: readyValue
+					})
+				});
+				updateByState(data.state);
+				setStatus(readyValue ? "jestes gotowy" : "usunieto gotowosc");
+			} catch (err) {
+				setStatus("blad ustawiania gotowosci");
 			}
 		}
 
@@ -677,18 +687,22 @@
 				myName = safeName(storedName, storedPlayer);
 				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
 				loadVolume();
+				buildMusicPresetSelect();
 				updateAdminUi();
+				updateReadyUi();
 				startPolling();
 				refreshState();
-				if (isAdmin()) {
-					loadPolishHipHop();
-				}
 			}
 		}
 
-		searchBtn.addEventListener("click", searchTracks);
-		loadPolishBtn.addEventListener("click", loadPolishHipHop);
-		searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { searchTracks(); } });
+		musicPreset.addEventListener("change", () => {
+			if (musicPreset.value === "__custom__") {
+				customMusicWrap.classList.remove("hidden");
+			} else {
+				customMusicWrap.classList.add("hidden");
+			}
+		});
+		saveMusicTypeBtn.addEventListener("click", saveMusicType);
 		startRoundBtn.addEventListener("click", startQuizRound);
 		nextPhaseBtn.addEventListener("click", requestNextPhase);
 		autoToggleBtn.addEventListener("click", () => {
@@ -706,9 +720,10 @@
 			applyVolume();
 		});
 		buzzerBtn.addEventListener("click", clickBuzzer);
+		readyBtn.addEventListener("click", () => {
+			setReady(!myReady);
+		});
 		guessBtn.addEventListener("click", markGuess);
-		goodBtn.addEventListener("click", () => { updateScore(1); });
-		badBtn.addEventListener("click", () => { updateScore(-1); });
 		resetBtn.addEventListener("click", resetRound);
 		changeBtn.addEventListener("click", leaveAndGoModeChoice);
 		window.addEventListener("pagehide", sendLeaveBeacon);
