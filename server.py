@@ -147,6 +147,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _is_default_player_name(self, player, name):
 		return str(name or "").strip() == _default_name_for_player(player)
 
+	def _same_name(self, left, right):
+		return str(left or "").strip().lower() == str(right or "").strip().lower()
+
 	def _find_player_by_name(self, name):
 		target = str(name or "").strip().lower()
 		if not target:
@@ -249,6 +252,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-video-sync":
 			self.handle_buzzer_video_sync_post()
+			return
+		if parsed.path == "/api/buzzer-leave":
+			self.handle_buzzer_leave_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -483,6 +489,33 @@ class AppHandler(SimpleHTTPRequestHandler):
 				},
 				200,
 			)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_leave_post(self):
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			player = self._sanitize_player(parsed.get("player"))
+			if player is None:
+				self.json_response({"error": "Invalid player number"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
+			key = str(player)
+			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+			if not self._same_name(current_name, name):
+				self.json_response({"ok": True, "released": False, "state": self._public_buzzer_state()}, 200)
+				return
+			# Najważniejsze: przy wyjsciu karty zwalniamy slot gracza, zeby kolejna osoba mogla go zajac.
+			BUZZER_STATE["player_names"][key] = _default_name_for_player(player)
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "released": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 

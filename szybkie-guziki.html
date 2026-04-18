@@ -633,6 +633,42 @@
 			window.location.href = "wybor-ksywy.html";
 		}
 
+		function sendLeaveBeacon(player, name) {
+			if (!isValidPlayer(player) || !name) {
+				return;
+			}
+			if (typeof navigator.sendBeacon !== "function") {
+				return;
+			}
+			const payload = JSON.stringify({
+				player: player,
+				name: name
+			});
+			const blob = new Blob([payload], { type: "application/json" });
+			navigator.sendBeacon(buildApiUrl("/api/buzzer-leave"), blob);
+		}
+
+		async function leavePlayerServer(player, name) {
+			if (!isValidPlayer(player) || !name) {
+				return;
+			}
+			try {
+				await fetch(buildApiUrl("/api/buzzer-leave"), {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						player: player,
+						name: name
+					}),
+					keepalive: true
+				});
+			} catch (err) {
+				return;
+			}
+		}
+
 		function persistIdentity() {
 			if (myPlayer && isValidPlayer(myPlayer)) {
 				localStorage.setItem(getStorageKey("player"), String(myPlayer));
@@ -801,9 +837,13 @@
 		}
 
 		function leaveGame() {
+			const leavingPlayer = myPlayer;
+			const leavingName = myName;
 			myPlayer = null;
 			myName = "";
 			localStorage.removeItem(getStorageKey("player"));
+			localStorage.removeItem(getStorageKey("name"));
+			leavePlayerServer(leavingPlayer, leavingName);
 			stopVideoSyncLoop();
 			if (pollTimer) {
 				clearInterval(pollTimer);
@@ -829,6 +869,9 @@
 			if (event.key === "Enter") {
 				setVideo();
 			}
+		});
+		window.addEventListener("pagehide", () => {
+			sendLeaveBeacon(myPlayer, myName);
 		});
 
 		{

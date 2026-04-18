@@ -136,6 +136,33 @@
 			window.location.href = "szybkie-guziki.html";
 		}
 
+		function clearStoredIdentity() {
+			localStorage.removeItem(getStorageKey("player"));
+			localStorage.removeItem(getStorageKey("name"));
+		}
+
+		function sendLeaveBeacon(player, name) {
+			if (!isValidPlayer(player) || !name) {
+				return;
+			}
+			if (typeof navigator.sendBeacon !== "function") {
+				return;
+			}
+			const payload = JSON.stringify({
+				player: player,
+				name: name
+			});
+			const blob = new Blob([payload], { type: "application/json" });
+			navigator.sendBeacon(buildApiUrl("/api/buzzer-leave"), blob);
+		}
+
+		function releasePreviousIdentityIfAny() {
+			const oldPlayer = Number(localStorage.getItem(getStorageKey("player")));
+			const oldName = safeName(localStorage.getItem(getStorageKey("name")));
+			sendLeaveBeacon(oldPlayer, oldName);
+			clearStoredIdentity();
+		}
+
 		async function fetchJson(url, options) {
 			const response = await fetch(buildApiUrl(url), options || {});
 			if (!response.ok) {
@@ -185,14 +212,7 @@
 		});
 
 		{
-			const storedPlayer = Number(localStorage.getItem(getStorageKey("player")));
-			const storedName = safeName(localStorage.getItem(getStorageKey("name")));
-			if (storedName) {
-				nickInput.value = storedName;
-			}
-			if (isValidPlayer(storedPlayer) && storedName) {
-				goToGame();
-			}
+			releasePreviousIdentityIfAny();
 		}
 	</script>
 </body>
