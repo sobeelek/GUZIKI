@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Wybor ksywy</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: Arial, sans-serif;
+		}
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: #111827;
+			color: #f9fafb;
+		}
+
+		.panel {
+			width: min(500px, 92vw);
+			padding: 28px;
+			border-radius: 16px;
+			background: #1f2937;
+			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+			text-align: center;
+			display: grid;
+			gap: 12px;
+		}
+
+		h1 {
+			margin: 0;
+			font-size: 28px;
+		}
+
+		.info {
+			margin: 0;
+			font-size: 15px;
+			color: #d1d5db;
+		}
+
+		label {
+			text-align: left;
+			font-size: 14px;
+			color: #9ca3af;
+		}
+
+		input {
+			border: 1px solid #374151;
+			border-radius: 10px;
+			background: #0b1220;
+			color: #f9fafb;
+			padding: 11px 12px;
+			font-size: 16px;
+		}
+
+		button {
+			border: 0;
+			border-radius: 12px;
+			padding: 12px 14px;
+			font-size: 16px;
+			font-weight: bold;
+			background: #2563eb;
+			color: #fff;
+			cursor: pointer;
+			transition: transform 0.08s ease, background 0.2s ease;
+		}
+
+		button:hover {
+			background: #1d4ed8;
+		}
+
+		button:active {
+			transform: scale(0.97);
+		}
+
+		button[disabled] {
+			opacity: 0.6;
+			cursor: not-allowed;
+		}
+
+		.status {
+			min-height: 22px;
+			margin: 0;
+			font-size: 14px;
+			color: #9ca3af;
+		}
+	</style>
+</head>
+<body>
+	<div class="panel">
+		<h1>Wejscie do gry</h1>
+		<p class="info">Wpisz ksywe, a numer gracza przydzieli sie automatycznie.</p>
+		<label for="nickInput">Ksywka</label>
+		<input id="nickInput" type="text" maxlength="20" placeholder="np. sobik" />
+		<button id="joinBtn">Wejdz do gry</button>
+		<p id="status" class="status"></p>
+	</div>
+
+	<script>
+		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
+		const MAX_PLAYERS = 8;
+		const nickInput = document.getElementById("nickInput");
+		const joinBtn = document.getElementById("joinBtn");
+		const statusEl = document.getElementById("status");
+
+		function getStorageKey(prefix) {
+			return "buzzer_" + prefix;
+		}
+
+		function safeName(value) {
+			const text = String(value || "").trim();
+			if (!text) {
+				return "";
+			}
+			return text.slice(0, 20);
+		}
+
+		function isValidPlayer(player) {
+			return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS;
+		}
+
+		function buildApiUrl(path) {
+			const base = String(API_BASE_URL || "").replace(/\/+$/, "");
+			return base + path;
+		}
+
+		function setStatus(text) {
+			statusEl.textContent = text;
+		}
+
+		function goToGame() {
+			window.location.href = "szybkie-guziki.html";
+		}
+
+		async function fetchJson(url, options) {
+			const response = await fetch(buildApiUrl(url), options || {});
+			if (!response.ok) {
+				throw new Error("HTTP " + response.status);
+			}
+			return await response.json();
+		}
+
+		async function joinGame() {
+			const name = safeName(nickInput.value);
+			if (!name) {
+				setStatus("Wpisz ksywke.");
+				return;
+			}
+			joinBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/buzzer-join-auto", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						name: name
+					})
+				});
+				const player = Number(data.player);
+				if (!isValidPlayer(player)) {
+					setStatus("Blad przydzialu gracza.");
+					joinBtn.disabled = false;
+					return;
+				}
+				// Najwazniejsze: zapisujemy ksywe i przydzial gracza przed przejsciem do glownej strony gry.
+				localStorage.setItem(getStorageKey("name"), name);
+				localStorage.setItem(getStorageKey("player"), String(player));
+				goToGame();
+			} catch (err) {
+				setStatus("Blad polaczenia z serwerem.");
+				joinBtn.disabled = false;
+			}
+		}
+
+		joinBtn.addEventListener("click", joinGame);
+		nickInput.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				joinGame();
+			}
+		});
+
+		{
+			const storedPlayer = Number(localStorage.getItem(getStorageKey("player")));
+			const storedName = safeName(localStorage.getItem(getStorageKey("name")));
+			if (storedName) {
+				nickInput.value = storedName;
+			}
+			if (isValidPlayer(storedPlayer) && storedName) {
+				goToGame();
+			}
+		}
+	</script>
+</body>
+</html>

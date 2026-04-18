@@ -273,15 +273,7 @@
 		<h1>Kto pierwszy, ten odpowiada</h1>
 		<p class="info">Kazdy widzi tylko swoj guzik, a klik jednego blokuje runde u wszystkich.</p>
 
-		<div id="setupView" class="setup">
-			<div class="field">
-				<label for="nickInput">Twoja ksywka</label>
-				<input id="nickInput" type="text" maxlength="20" value="" placeholder="np. Kosa" />
-			</div>
-			<button id="joinBtn" class="primary">Wejdz do gry</button>
-		</div>
-
-		<div id="gameView" class="buzzer-area hidden">
+		<div id="gameView" class="buzzer-area">
 			<div class="game-layout">
 				<div class="game-main">
 					<p class="me" id="meInfo"></p>
@@ -321,10 +313,6 @@
 		const MAX_PLAYERS = 8;
 		const VIDEO_CONTROLLER_NAME = "sobik";
 
-		const setupView = document.getElementById("setupView");
-		const gameView = document.getElementById("gameView");
-		const nickInput = document.getElementById("nickInput");
-		const joinBtn = document.getElementById("joinBtn");
 		const meInfo = document.getElementById("meInfo");
 		const videoControls = document.getElementById("videoControls");
 		const buzzerBtn = document.getElementById("buzzerBtn");
@@ -641,22 +629,8 @@
 			videoSyncTimer = null;
 		}
 
-		function isGameView() {
-			const params = new URLSearchParams(window.location.search);
-			return params.get("view") === "game";
-		}
-
-		function goToGameView() {
-			window.location.href = "szybkie-guziki.html?view=game";
-		}
-
 		function goToSetupView() {
-			window.location.href = "szybkie-guziki.html";
-		}
-
-		function setJoinedUi(isJoined) {
-			setupView.classList.toggle("hidden", isJoined);
-			gameView.classList.toggle("hidden", !isJoined);
+			window.location.href = "wybor-ksywy.html";
 		}
 
 		function persistIdentity() {
@@ -664,13 +638,6 @@
 				localStorage.setItem(getStorageKey("player"), String(myPlayer));
 			}
 			localStorage.setItem(getStorageKey("name"), myName);
-		}
-
-		function restoreIdentity() {
-			const storedName = localStorage.getItem(getStorageKey("name"));
-			if (storedName) {
-				nickInput.value = storedName;
-			}
 		}
 
 		function updateByState(state) {
@@ -826,54 +793,11 @@
 			}
 		}
 
-		async function registerPlayerAuto() {
-			try {
-				const data = await fetchJson("/api/buzzer-join-auto", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json"
-					},
-					body: JSON.stringify({
-						name: myName
-					})
-				});
-				const assignedPlayer = Number(data.player);
-				if (!isValidPlayer(assignedPlayer)) {
-					setStatus("blad przydzialu gracza");
-					return false;
-				}
-				myPlayer = assignedPlayer;
-				updateByState(data.state);
-				return true;
-			} catch (err) {
-				setStatus("blad rejestracji gracza");
-				return false;
-			}
-		}
-
 		function startPolling() {
 			if (pollTimer) {
 				clearInterval(pollTimer);
 			}
 			pollTimer = setInterval(refreshState, 300);
-		}
-
-		async function joinGame() {
-			const normalized = String(nickInput.value || "").trim();
-			if (!normalized) {
-				setStatus("wpisz ksywke");
-				return;
-			}
-			myName = safeName(normalized, 1);
-			joinBtn.disabled = true;
-			const registered = await registerPlayerAuto();
-			joinBtn.disabled = false;
-			if (!registered) {
-				return;
-			}
-			meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
-			persistIdentity();
-			goToGameView();
 		}
 
 		function leaveGame() {
@@ -885,14 +809,12 @@
 				clearInterval(pollTimer);
 				pollTimer = null;
 			}
-			setJoinedUi(false);
 			updateVideoLockUi();
 			updateVideoControlsUi();
 			setStatus("offline");
 			goToSetupView();
 		}
 
-		joinBtn.addEventListener("click", joinGame);
 		buzzerBtn.addEventListener("click", clickBuzzer);
 		resetBtn.addEventListener("click", resetRound);
 		changeBtn.addEventListener("click", leaveGame);
@@ -909,13 +831,7 @@
 			}
 		});
 
-		restoreIdentity();
-		if (!isGameView()) {
-			setJoinedUi(false);
-			if (nickInput.value.trim().length === 0) {
-				nickInput.value = "";
-			}
-		} else {
+		{
 			const storedPlayer = Number(localStorage.getItem(getStorageKey("player")));
 			const storedName = String(localStorage.getItem(getStorageKey("name")) || "").trim();
 			if (!isValidPlayer(storedPlayer) || !storedName) {
@@ -924,7 +840,6 @@
 				myPlayer = storedPlayer;
 				myName = safeName(storedName, storedPlayer);
 				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
-				setJoinedUi(true);
 				updateVideoLockUi();
 				updateVideoControlsUi();
 				startPolling();
