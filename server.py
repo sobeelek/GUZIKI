@@ -15,6 +15,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
 MAX_PLAYERS = 8
+VIDEO_CONTROLLER_NAME = "sobik"
 
 
 def _default_scores():
@@ -32,6 +33,7 @@ BUZZER_STATE = {
 	"winner_time_ms": None,
 	"video_url": "",
 	"video_paused": False,
+	"video_time_sec": 0.0,
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
 	"last_update_ms": 0,
@@ -118,6 +120,26 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return None
 		return delta
 
+	def _sanitize_time_sec(self, value):
+		try:
+			time_sec = float(value)
+		except Exception:
+			return None
+		if time_sec < 0:
+			return 0.0
+		if time_sec > 86400:
+			return 86400.0
+		return time_sec
+
+	def _sanitize_bool(self, value):
+		if isinstance(value, bool):
+			return value
+		return None
+
+	def _is_video_controller(self, name):
+		text = str(name or "").strip().lower()
+		return text == VIDEO_CONTROLLER_NAME
+
 	def _new_round(self):
 		BUZZER_STATE["round_id"] = BUZZER_STATE["round_id"] + 1
 		BUZZER_STATE["round_started_ms"] = self._now_ms()
@@ -155,6 +177,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"winnerTimeMs": BUZZER_STATE["winner_time_ms"],
 			"videoUrl": BUZZER_STATE["video_url"],
 			"videoPaused": BUZZER_STATE["video_paused"],
+			"videoTimeSec": BUZZER_STATE["video_time_sec"],
+			"videoControllerName": VIDEO_CONTROLLER_NAME,
 			"scores": BUZZER_STATE["scores"],
 			"playerNames": BUZZER_STATE["player_names"],
 			"lastUpdateMs": BUZZER_STATE["last_update_ms"],
@@ -193,6 +217,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/buzzer-join":
 			self.handle_buzzer_join_post()
+			return
+		if parsed.path == "/api/buzzer-video-sync":
+			self.handle_buzzer_video_sync_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -309,6 +336,36 @@ class AppHandler(SimpleHTTPRequestHandler):
 			video_url = str(parsed.get("videoUrl", "")).strip()
 			BUZZER_STATE["video_url"] = video_url
 			BUZZER_STATE["video_paused"] = False
+			BUZZER_STATE["video_time_sec"] = 0.0
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_buzzer_video_sync_post(self):
+		try:
+			self._ensure_round_started()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = str(parsed.get("name", "")).strip()
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can control video"}, 403)
+				return
+			time_sec = self._sanitize_time_sec(parsed.get("timeSec"))
+			if time_sec is None:
+				self.json_response({"error": "Invalid timeSec"}, 400)
+				return
+			paused = self._sanitize_bool(parsed.get("paused"))
+			if paused is None:
+				self.json_response({"error": "Invalid paused flag"}, 400)
+				return
+			# Najważniejsze: tylko sobik aktualizuje globalny czas filmu, zeby wszystkim przewijalo sie identycznie.
+			BUZZER_STATE["video_time_sec"] = time_sec
+			BUZZER_STATE["video_paused"] = paused
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:

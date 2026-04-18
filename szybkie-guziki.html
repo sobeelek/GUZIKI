@@ -151,6 +151,7 @@
 		}
 
 		.video-wrap {
+			position: relative;
 			border-radius: 12px;
 			overflow: hidden;
 			background: #0b1220;
@@ -173,6 +174,22 @@
 			color: #9ca3af;
 			font-size: 14px;
 			padding: 12px;
+		}
+
+		.video-lock-overlay {
+			position: absolute;
+			inset: 0;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 12px;
+			font-size: 14px;
+			font-weight: 700;
+			color: #f3f4f6;
+			background: rgba(15, 23, 42, 0.7);
+			backdrop-filter: blur(2px);
+			z-index: 2;
+			pointer-events: all;
 		}
 
 		.score-controls {
@@ -256,7 +273,10 @@
 				<button id="setVideoBtn">Ustaw film</button>
 			</div>
 			<div class="video-wrap" id="videoWrap">
-				<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+				<div id="videoStage">
+					<div class="video-empty">Brak filmu - wklej link YouTube.</div>
+				</div>
+				<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
 			</div>
 			<div class="score-controls">
 				<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
@@ -278,6 +298,7 @@
 		// Najwazniejsze: domyslnie uzywamy tego samego hosta co strona, a recznie mozna nadpisac window.API_BASE_URL.
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 		const MAX_PLAYERS = 8;
+		const VIDEO_CONTROLLER_NAME = "sobik";
 
 		const setupView = document.getElementById("setupView");
 		const gameView = document.getElementById("gameView");
@@ -293,6 +314,8 @@
 		const ytInput = document.getElementById("ytInput");
 		const setVideoBtn = document.getElementById("setVideoBtn");
 		const videoWrap = document.getElementById("videoWrap");
+		const videoStage = document.getElementById("videoStage");
+		const videoLockOverlay = document.getElementById("videoLockOverlay");
 		const goodBtn = document.getElementById("goodBtn");
 		const badBtn = document.getElementById("badBtn");
 		const myScore = document.getElementById("myScore");
@@ -304,8 +327,15 @@
 		let pollTimer = null;
 		let currentVideoUrl = "";
 		let isVideoPaused = false;
+		let currentVideoTimeSec = 0;
 		let currentScores = {};
 		let currentPlayerNames = {};
+		let ytApiReady = false;
+		let ytPlayer = null;
+		let currentVideoId = "";
+		let pendingVideoId = "";
+		let videoSyncTimer = null;
+		let isApplyingRemoteVideoState = false;
 
 		function getStorageKey(prefix) {
 			return "buzzer_" + prefix;
@@ -317,6 +347,14 @@
 				return text.slice(0, 20);
 			}
 			return "Gracz " + player;
+		}
+
+		function normalizeName(value) {
+			return String(value || "").trim().toLowerCase();
+		}
+
+		function isVideoController() {
+			return normalizeName(myName) === VIDEO_CONTROLLER_NAME;
 		}
 
 		function isValidPlayer(player) {
@@ -408,19 +446,68 @@
 			return "https://www.youtube.com/embed/" + videoId + "?enablejsapi=1&autoplay=1&rel=0&playsinline=1";
 		}
 
-		function sendVideoCommand(commandName) {
-			const frame = document.getElementById("ytFrame");
-			if (!frame || !frame.contentWindow) {
+		function updateVideoLockUi() {
+			videoLockOverlay.classList.toggle("hidden", isVideoController());
+		}
+
+		function ensureYouTubeApi() {
+			if (window.YT && window.YT.Player) {
+				ytApiReady = true;
+				if (pendingVideoId) {
+					createYouTubePlayer(pendingVideoId);
+				}
 				return;
 			}
-			frame.contentWindow.postMessage(
-				JSON.stringify({
-					event: "command",
-					func: commandName,
-					args: []
-				}),
-				"*"
-			);
+			if (document.getElementById("ytIframeApiScript")) {
+				return;
+			}
+			const script = document.createElement("script");
+			script.id = "ytIframeApiScript";
+			script.src = "https://www.youtube.com/iframe_api";
+			document.head.appendChild(script);
+		}
+
+		window.onYouTubeIframeAPIReady = function() {
+			ytApiReady = true;
+			if (pendingVideoId) {
+				createYouTubePlayer(pendingVideoId);
+			}
+		};
+
+		function destroyYouTubePlayer() {
+			if (ytPlayer && typeof ytPlayer.destroy === "function") {
+				ytPlayer.destroy();
+			}
+			ytPlayer = null;
+		}
+
+		function createYouTubePlayer(videoId) {
+			if (!ytApiReady || !(window.YT && window.YT.Player)) {
+				pendingVideoId = videoId;
+				return;
+			}
+			pendingVideoId = "";
+			currentVideoId = videoId;
+			videoStage.innerHTML = '<div id="ytFrame" class="video-frame"></div>';
+			destroyYouTubePlayer();
+			ytPlayer = new window.YT.Player("ytFrame", {
+				videoId: videoId,
+				playerVars: {
+					autoplay: 1,
+					rel: 0,
+					playsinline: 1
+				},
+				events: {
+					onReady: function() {
+						syncVideoState();
+					},
+					onStateChange: function() {
+						if (!isApplyingRemoteVideoState) {
+							sendMyVideoSync();
+						}
+					}
+				}
+			});
 		}
 
 		function renderVideo(urlValue) {
@@ -428,24 +515,105 @@
 			const videoId = extractYouTubeId(text);
 			currentVideoUrl = text;
 			if (!videoId) {
-				videoWrap.innerHTML = '<div class="video-empty">Brak filmu - wklej link YouTube.</div>';
+				currentVideoId = "";
+				pendingVideoId = "";
+				destroyYouTubePlayer();
+				videoStage.innerHTML = '<div class="video-empty">Brak filmu - wklej link YouTube.</div>';
 				return;
 			}
-			const embedUrl = buildEmbedUrl(videoId);
-			videoWrap.innerHTML = '<iframe id="ytFrame" class="video-frame" src="' + embedUrl + '" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+			if (currentVideoId === videoId && ytPlayer) {
+				return;
+			}
+			pendingVideoId = videoId;
+			ensureYouTubeApi();
+			if (ytApiReady) {
+				createYouTubePlayer(videoId);
+			}
 		}
 
-		function syncVideoPause(pausedValue) {
-			const paused = Boolean(pausedValue);
-			if (paused === isVideoPaused) {
+		function getLocalVideoTimeSec() {
+			if (!ytPlayer || typeof ytPlayer.getCurrentTime !== "function") {
+				return 0;
+			}
+			const value = Number(ytPlayer.getCurrentTime());
+			if (!Number.isFinite(value) || value < 0) {
+				return 0;
+			}
+			return value;
+		}
+
+		function isLocalVideoPaused() {
+			if (!ytPlayer || typeof ytPlayer.getPlayerState !== "function" || !window.YT) {
+				return true;
+			}
+			const state = ytPlayer.getPlayerState();
+			return state !== window.YT.PlayerState.PLAYING && state !== window.YT.PlayerState.BUFFERING;
+		}
+
+		function syncVideoState() {
+			if (!ytPlayer || typeof ytPlayer.seekTo !== "function") {
 				return;
 			}
-			isVideoPaused = paused;
-			if (paused) {
-				sendVideoCommand("pauseVideo");
+			const targetTime = Number(currentVideoTimeSec || 0);
+			if (!isVideoController()) {
+				const currentTime = getLocalVideoTimeSec();
+				if (Math.abs(currentTime - targetTime) > 1.2) {
+					isApplyingRemoteVideoState = true;
+					ytPlayer.seekTo(targetTime, true);
+					isApplyingRemoteVideoState = false;
+				}
+			}
+			isApplyingRemoteVideoState = true;
+			if (isVideoPaused) {
+				if (typeof ytPlayer.pauseVideo === "function") {
+					ytPlayer.pauseVideo();
+				}
+			} else {
+				if (typeof ytPlayer.playVideo === "function") {
+					ytPlayer.playVideo();
+				}
+			}
+			isApplyingRemoteVideoState = false;
+		}
+
+		async function sendMyVideoSync() {
+			if (!isVideoController() || !ytPlayer || !myName) {
 				return;
 			}
-			sendVideoCommand("playVideo");
+			try {
+				const data = await fetchJson("/api/buzzer-video-sync", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({
+						name: myName,
+						timeSec: getLocalVideoTimeSec(),
+						paused: isLocalVideoPaused()
+					})
+				});
+				currentVideoTimeSec = Number(data.state.videoTimeSec || 0);
+				isVideoPaused = Boolean(data.state.videoPaused);
+			} catch (err) {
+				return;
+			}
+		}
+
+		function startVideoSyncLoop() {
+			if (videoSyncTimer) {
+				clearInterval(videoSyncTimer);
+			}
+			videoSyncTimer = setInterval(() => {
+				sendMyVideoSync();
+			}, 700);
+		}
+
+		function stopVideoSyncLoop() {
+			if (!videoSyncTimer) {
+				return;
+			}
+			clearInterval(videoSyncTimer);
+			videoSyncTimer = null;
 		}
 
 		function setJoinedUi(isJoined) {
@@ -474,6 +642,7 @@
 			currentState = state;
 			currentScores = state.scores || {};
 			currentPlayerNames = state.playerNames || {};
+			currentVideoTimeSec = Number(state.videoTimeSec || 0);
 			const winner = state.winner;
 			const winnerName = state.winnerName || ("Gracz " + winner);
 			const winnerTime = state.winnerTimeMs;
@@ -481,7 +650,9 @@
 			if ((state.videoUrl || "") !== currentVideoUrl) {
 				renderVideo(state.videoUrl || "");
 			}
-			syncVideoPause(state.videoPaused);
+			isVideoPaused = Boolean(state.videoPaused);
+			updateVideoLockUi();
+			syncVideoState();
 
 			if (winner === null) {
 				result.textContent = "Czekam na pierwszy klik...";
@@ -653,7 +824,9 @@
 			meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
 			persistIdentity();
 			setJoinedUi(true);
+			updateVideoLockUi();
 			startPolling();
+			startVideoSyncLoop();
 			registerPlayer();
 			refreshState();
 		}
@@ -661,11 +834,13 @@
 		function leaveGame() {
 			myPlayer = null;
 			myName = "";
+			stopVideoSyncLoop();
 			if (pollTimer) {
 				clearInterval(pollTimer);
 				pollTimer = null;
 			}
 			setJoinedUi(false);
+			updateVideoLockUi();
 			setStatus("offline");
 		}
 
@@ -703,6 +878,7 @@
 		if (window.location.hostname.indexOf("github.io") !== -1 && API_BASE_URL.indexOf("127.0.0.1") !== -1) {
 			setStatus("ustaw poprawny API_BASE_URL do zdalnego backendu");
 		}
+		updateVideoLockUi();
 		renderScoreboard();
 	</script>
 </body>
