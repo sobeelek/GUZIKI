@@ -178,6 +178,24 @@
 			background: #14532d;
 		}
 
+		.guess-row {
+			display: grid;
+			grid-template-columns: 1fr auto;
+			gap: 10px;
+			align-items: center;
+		}
+
+		.reveal-panel {
+			border: 2px solid #22c55e;
+			border-radius: 12px;
+			padding: 14px;
+			background: #052e16;
+			font-size: 18px;
+			font-weight: 700;
+			text-align: center;
+			color: #ecfdf5;
+		}
+
 		@media (max-width: 960px) {
 			.app-layout {
 				grid-template-columns: 1fr;
@@ -195,10 +213,10 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Fazy: 1s -> 3s -> 8s -> 16s. Sobik wybiera tylko typ muzyki (zapytanie Deezer); kazda runda to losowy utwor z tej puli.</p>
+			<p class="info">Zasada: 1s, potem 3s, 8s, 16s fragmentu od poczatku preview Deezer. Zgadujesz wpisujac artyste i tytul (np. Pezet - Nie znam sie). Zielono = zgadles te piosenke. Na koncu ~10s fragment ze srodka preview + podpis. Sobik ustawia typ muzyki.</p>
 			<p class="me" id="meInfo"></p>
 			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
-			<p id="sobikRoundTrack" class="quiz-state hidden"></p>
+			<div id="revealPanel" class="reveal-panel hidden"></div>
 
 			<div id="adminMusicSetup" class="section hidden">
 				<label for="musicPreset">Typ muzyki (Deezer)</label>
@@ -209,7 +227,7 @@
 				<button id="saveMusicTypeBtn" class="main">Zapisz typ</button>
 			</div>
 			<div id="adminRoundControls" class="phase-actions hidden">
-				<button id="startRoundBtn">Start 1s</button>
+				<button id="startRoundBtn">Start recznie (gdy auto nie zaskoczy)</button>
 				<button id="nextPhaseBtn">Nastepna faza</button>
 				<button id="autoToggleBtn">Auto: ON</button>
 				<button id="stopClipBtn">Stop klipu</button>
@@ -224,10 +242,12 @@
 				</div>
 			</div>
 
-			<button id="buzzerBtn" class="main" style="font-size:40px;padding:26px 10px;">KLIK</button>
 			<button id="readyBtn">Gotowy: NIE</button>
-			<button id="guessBtn" class="main">Zgadlem</button>
-			<p id="result" class="result">Czekam na pierwszy klik...</p>
+			<div class="guess-row">
+				<input id="guessInput" type="text" placeholder="Artysta - tytul piosenki" autocomplete="off" />
+				<button id="guessSubmitBtn" class="main">Sprawdz</button>
+			</div>
+			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na kolejna fase.</p>
 
 			<div class="bottom-actions">
 				<button id="resetBtn">Reset rundy</button>
@@ -251,7 +271,7 @@
 		const AUTO_PHASE_DELAY_MS = 700;
 		const meInfo = document.getElementById("meInfo");
 		const musicTypeLine = document.getElementById("musicTypeLine");
-		const sobikRoundTrack = document.getElementById("sobikRoundTrack");
+		const revealPanel = document.getElementById("revealPanel");
 		const adminMusicSetup = document.getElementById("adminMusicSetup");
 		const adminRoundControls = document.getElementById("adminRoundControls");
 		const musicPreset = document.getElementById("musicPreset");
@@ -265,9 +285,9 @@
 		const volumeRange = document.getElementById("volumeRange");
 		const volumeLabel = document.getElementById("volumeLabel");
 		const quizPlaybackInfo = document.getElementById("quizPlaybackInfo");
-		const buzzerBtn = document.getElementById("buzzerBtn");
+		const guessInput = document.getElementById("guessInput");
+		const guessSubmitBtn = document.getElementById("guessSubmitBtn");
 		const readyBtn = document.getElementById("readyBtn");
-		const guessBtn = document.getElementById("guessBtn");
 		const result = document.getElementById("result");
 		const resetBtn = document.getElementById("resetBtn");
 		const changeBtn = document.getElementById("changeBtn");
@@ -441,13 +461,51 @@
 			try { quizAudio.currentTime = 0; } catch (err) { return; }
 		}
 
+		function playRevealFromMiddle(durationSec) {
+			const onMeta = () => {
+				quizAudio.removeEventListener("loadedmetadata", onMeta);
+				let d = quizAudio.duration;
+				if (!Number.isFinite(d) || d <= 0) {
+					d = 30;
+				}
+				let start = d / 2 - 5;
+				if (start < 0) {
+					start = 0;
+				}
+				if (start + durationSec > d) {
+					start = Math.max(0, d - durationSec);
+				}
+				try {
+					quizAudio.currentTime = start;
+				} catch (err1) {
+					try {
+						quizAudio.currentTime = 0;
+					} catch (err2) {}
+				}
+				quizAudio.play().then(() => {
+					clipStopTimer = setTimeout(() => {
+						stopCurrentClip();
+					}, durationSec * 1000);
+				}).catch(() => {
+					setStatus("nie mozna odtworzyc ujawnienia");
+				});
+			};
+			if (quizAudio.readyState >= 1) {
+				onMeta();
+			} else {
+				quizAudio.addEventListener("loadedmetadata", onMeta);
+			}
+		}
+
 		async function playQuizClipFromState(state) {
 			const previewUrl = String(state.quizPreviewUrl || "").trim();
 			const durationSec = Number(state.quizCommandDurationSec || 0);
+			const reveal = Boolean(state.quizRevealActive);
+			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
 			if (!previewUrl || durationSec <= 0) {
 				return;
 			}
-			if (isPlayerGuessed(myPlayer)) {
+			if (!reveal && !seekMiddle && isPlayerGuessed(myPlayer)) {
 				return;
 			}
 			stopCurrentClip();
@@ -456,6 +514,10 @@
 			}
 			applyVolume();
 			try {
+				if (reveal && seekMiddle) {
+					playRevealFromMiddle(durationSec);
+					return;
+				}
 				quizAudio.currentTime = 0;
 				await quizAudio.play();
 				clipStopTimer = setTimeout(() => {
@@ -499,9 +561,7 @@
 			const guessedCount = Number(state.quizGuessedCount || 0);
 			const occupiedCount = Number(state.quizOccupiedCount || 0);
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
-			const durations = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [1, 3, 8, 16];
-			const maxIndex = durations.length - 1;
-			if (!roundActive || phaseIndex < 0 || phaseIndex >= maxIndex) {
+			if (!roundActive || phaseIndex < 0) {
 				return;
 			}
 			if (occupiedCount > 0 && guessedCount >= occupiedCount) {
@@ -521,42 +581,49 @@
 			currentGuessed = state.quizGuessedPlayers || {};
 			const readyPlayers = state.quizReadyPlayers || {};
 			myReady = Boolean(readyPlayers[String(myPlayer)]);
-			const winner = state.winner;
-			const winnerName = state.winnerName || ("Gracz " + winner);
-			const winnerTime = state.winnerTimeMs;
-			if (winner === null) {
-				result.textContent = "Czekam na pierwszy klik...";
-				buzzerBtn.disabled = false;
-			} else {
-				result.textContent = winnerName + " kliknal(a) pierwszy! Czas: " + winnerTime + " ms";
-				buzzerBtn.disabled = true;
-			}
-			guessBtn.disabled = isPlayerGuessed(myPlayer) || !Boolean(state.quizRoundActive);
-			updateReadyUi();
+			const revealOn = Boolean(state.quizRevealActive);
 			const mq = String(state.quizMusicQuery || "").trim();
 			musicTypeLine.textContent = "Typ muzyki (losowo z Deezer): " + (mq || "(brak)");
 			if (isAdmin()) {
 				syncMusicControlsFromQuery(mq);
 			}
-			const roundOn = Boolean(state.quizRoundActive);
-			const selectedLabel = String(state.quizTrackLabel || "").trim();
-			if (isAdmin() && roundOn && selectedLabel) {
-				sobikRoundTrack.textContent = "Podglad (sobik): teraz gra — " + selectedLabel;
-				sobikRoundTrack.classList.remove("hidden");
+			if (revealOn) {
+				const ans = String(state.quizTrackLabel || "").trim();
+				const art = String(state.quizTrackArtist || "").trim();
+				const tit = String(state.quizTrackTitle || "").trim();
+				let line = ans;
+				if (!line && (art || tit)) {
+					line = tit + (art ? " — " + art : "");
+				}
+				revealPanel.textContent = line ? ("To bylo: " + line) : "Koniec rundy — sluchaj ujawnienia.";
+				revealPanel.classList.remove("hidden");
 			} else {
-				sobikRoundTrack.textContent = "";
-				sobikRoundTrack.classList.add("hidden");
+				revealPanel.textContent = "";
+				revealPanel.classList.add("hidden");
 			}
+			const roundOn = Boolean(state.quizRoundActive);
+			guessSubmitBtn.disabled = isPlayerGuessed(myPlayer) || !roundOn || revealOn;
+			guessInput.disabled = guessSubmitBtn.disabled;
+			if (!roundOn && !revealOn) {
+				result.textContent = "Ustaw typ (sobik), potem Gotowy — startuje losowa piosenka.";
+			} else if (roundOn) {
+				result.textContent = isPlayerGuessed(myPlayer) ? "Zgadles — czekasz na ujawnienie." : "Sluchaj i wpisz artyste oraz tytul.";
+			} else if (revealOn) {
+				result.textContent = "Faza ujawnienia — sluchaj ~10s fragmentu ze srodka.";
+			}
+			updateReadyUi();
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
 			const phaseDuration = Number(state.quizCommandDurationSec || 0);
 			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [5, 3, 2, 1];
 			const readyCount = Number(state.quizReadyCount || 0);
 			const occupiedCount = Number(state.quizOccupiedCount || 0);
-			if (phaseIndex >= 0) {
+			if (revealOn) {
+				quizPlaybackInfo.textContent = "Ujawnienie odpowiedzi (~" + phaseDuration + "s fragment). Gotowi do kolejnej rundy: " + readyCount + "/" + occupiedCount;
+			} else if (phaseIndex >= 0) {
 				const points = phaseIndex >= 0 && phaseIndex < phasePoints.length ? phasePoints[phaseIndex] : 0;
 				quizPlaybackInfo.textContent = "Faza " + (phaseIndex + 1) + ": " + phaseDuration + "s (" + points + " pkt), gotowi " + readyCount + "/" + occupiedCount;
 			} else {
-				quizPlaybackInfo.textContent = "Czekam na start sobik... gotowi " + readyCount + "/" + occupiedCount;
+				quizPlaybackInfo.textContent = "Czekam na start (wszyscy Gotowy + typ)... gotowi " + readyCount + "/" + occupiedCount;
 			}
 			const token = Number(state.quizCommandToken || 0);
 			if (token > lastQuizCommandToken) {
@@ -578,38 +645,27 @@
 			}
 		}
 
-		async function clickBuzzer() {
-			if (!myPlayer) { return; }
-			if (currentState && currentState.winner !== null) { return; }
-			buzzerBtn.disabled = true;
-			try {
-				const data = await fetchJson("/api/buzzer-click", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ player: myPlayer, name: myName })
-				});
-				updateByState(data.state);
-				setStatus("online");
-			} catch (err) {
-				buzzerBtn.disabled = false;
-				setStatus("blad klikniecia");
-			}
-		}
-
 		async function markGuess() {
 			if (!myPlayer || isPlayerGuessed(myPlayer)) {
+				return;
+			}
+			const text = String(guessInput.value || "").trim();
+			if (text.length < 3) {
+				setStatus("za krotka odpowiedz");
 				return;
 			}
 			try {
 				const data = await fetchJson("/api/quiz-guess", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ player: myPlayer, name: myName })
+					body: JSON.stringify({ player: myPlayer, name: myName, guess: text })
 				});
+				guessInput.value = "";
 				updateByState(data.state);
-				setStatus("zaznaczono zgadniecie");
+				setStatus("trafione");
 			} catch (err) {
-				setStatus("blad zaznaczenia zgadniecia");
+				const msg = err && err.message ? String(err.message) : "blad";
+				setStatus(msg);
 			}
 		}
 
@@ -719,11 +775,15 @@
 			localStorage.setItem(getVolumeStorageKey(), String(localVolume));
 			applyVolume();
 		});
-		buzzerBtn.addEventListener("click", clickBuzzer);
 		readyBtn.addEventListener("click", () => {
 			setReady(!myReady);
 		});
-		guessBtn.addEventListener("click", markGuess);
+		guessSubmitBtn.addEventListener("click", markGuess);
+		guessInput.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				markGuess();
+			}
+		});
 		resetBtn.addEventListener("click", resetRound);
 		changeBtn.addEventListener("click", leaveAndGoModeChoice);
 		window.addEventListener("pagehide", sendLeaveBeacon);
