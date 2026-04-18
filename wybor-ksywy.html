@@ -88,6 +88,10 @@
 			font-size: 14px;
 			color: #9ca3af;
 		}
+
+		.hidden {
+			display: none;
+		}
 	</style>
 </head>
 <body>
@@ -95,7 +99,11 @@
 		<h1>Wejscie do gry</h1>
 		<p class="info">Wpisz ksywe, a numer gracza przydzieli sie automatycznie.</p>
 		<label for="nickInput">Ksywka</label>
-		<input id="nickInput" type="text" maxlength="20" placeholder="np. sobik" />
+		<input id="nickInput" type="text" maxlength="20" placeholder="sobik" />
+		<div id="passwordWrap" class="hidden">
+			<label for="passwordInput">Haslo admina</label>
+			<input id="passwordInput" type="password" maxlength="50" placeholder="Haslo dla sobik" />
+		</div>
 		<button id="joinBtn">Wejdz do gry</button>
 		<p id="status" class="status"></p>
 	</div>
@@ -104,6 +112,8 @@
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 		const MAX_PLAYERS = 8;
 		const nickInput = document.getElementById("nickInput");
+		const passwordWrap = document.getElementById("passwordWrap");
+		const passwordInput = document.getElementById("passwordInput");
 		const joinBtn = document.getElementById("joinBtn");
 		const statusEl = document.getElementById("status");
 
@@ -126,6 +136,18 @@
 		function buildApiUrl(path) {
 			const base = String(API_BASE_URL || "").replace(/\/+$/, "");
 			return base + path;
+		}
+
+		function isAdminName(name) {
+			return safeName(name).toLowerCase() === "sobik";
+		}
+
+		function updatePasswordUi() {
+			const show = isAdminName(nickInput.value);
+			passwordWrap.classList.toggle("hidden", !show);
+			if (!show) {
+				passwordInput.value = "";
+			}
 		}
 
 		function setStatus(text) {
@@ -165,10 +187,17 @@
 
 		async function fetchJson(url, options) {
 			const response = await fetch(buildApiUrl(url), options || {});
-			if (!response.ok) {
-				throw new Error("HTTP " + response.status);
+			let data = null;
+			try {
+				data = await response.json();
+			} catch (err) {
+				data = null;
 			}
-			return await response.json();
+			if (!response.ok) {
+				const errorText = data && data.error ? String(data.error) : "HTTP " + response.status;
+				throw new Error(errorText);
+			}
+			return data || {};
 		}
 
 		async function joinGame() {
@@ -177,6 +206,7 @@
 				setStatus("Wpisz ksywke.");
 				return;
 			}
+			const password = String(passwordInput.value || "");
 			joinBtn.disabled = true;
 			try {
 				const data = await fetchJson("/api/buzzer-join-auto", {
@@ -185,7 +215,8 @@
 						"Content-Type": "application/json"
 					},
 					body: JSON.stringify({
-						name: name
+						name: name,
+						password: password
 					})
 				});
 				const player = Number(data.player);
@@ -199,13 +230,23 @@
 				localStorage.setItem(getStorageKey("player"), String(player));
 				goToGame();
 			} catch (err) {
-				setStatus("Blad polaczenia z serwerem.");
+				if (String(err && err.message).indexOf("Invalid admin password") !== -1) {
+					setStatus("Bledne haslo dla sobik.");
+				} else {
+					setStatus("Blad polaczenia z serwerem.");
+				}
 				joinBtn.disabled = false;
 			}
 		}
 
 		joinBtn.addEventListener("click", joinGame);
+		nickInput.addEventListener("input", updatePasswordUi);
 		nickInput.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				joinGame();
+			}
+		});
+		passwordInput.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") {
 				joinGame();
 			}
@@ -213,6 +254,7 @@
 
 		{
 			releasePreviousIdentityIfAny();
+			updatePasswordUi();
 		}
 	</script>
 </body>

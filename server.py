@@ -16,6 +16,7 @@ CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
 MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
+VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
 
 
 def _default_scores():
@@ -143,6 +144,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _is_video_controller(self, name):
 		text = str(name or "").strip().lower()
 		return text == VIDEO_CONTROLLER_NAME
+
+	def _is_valid_video_controller_password(self, password):
+		return str(password or "") == VIDEO_CONTROLLER_PASSWORD
 
 	def _is_default_player_name(self, player, name):
 		return str(name or "").strip() == _default_name_for_player(player)
@@ -420,19 +424,21 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not isinstance(parsed, dict):
 				self.json_response({"error": "Payload must be an object"}, 400)
 				return
-			player = self._sanitize_player(parsed.get("player"))
-			if player is None:
-				self.json_response({"error": "Invalid player number"}, 400)
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can change scores"}, 403)
+				return
+			target_player = self._sanitize_player(parsed.get("targetPlayer"))
+			if target_player is None:
+				self.json_response({"error": "Invalid target player number"}, 400)
 				return
 			delta = self._sanitize_delta(parsed.get("delta"))
 			if delta is None:
 				self.json_response({"error": "Invalid delta"}, 400)
 				return
-			player_name = self._sanitize_name(parsed.get("name"), "Gracz %d" % player)
-			key = str(player)
+			key = str(target_player)
 			# Najważniejsze: punkty zapisujemy globalnie na serwerze, żeby kazdy klient widzial ten sam ranking.
 			BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + delta
-			BUZZER_STATE["player_names"][key] = player_name
 			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
@@ -474,6 +480,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"error": "Name is required"}, 400)
 				return
 			player_name = self._sanitize_name(raw_name, raw_name)
+			if self._is_video_controller(player_name):
+				password = parsed.get("password")
+				if not self._is_valid_video_controller_password(password):
+					self.json_response({"error": "Invalid admin password"}, 403)
+					return
 			existing_player = self._find_player_by_name(player_name)
 			if existing_player is not None:
 				assigned_player = existing_player

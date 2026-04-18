@@ -169,6 +169,21 @@
 			align-items: center;
 		}
 
+		.volume-controls {
+			display: grid;
+			grid-template-columns: auto 1fr auto;
+			align-items: center;
+			gap: 8px;
+			background: #111827;
+			border: 1px solid #374151;
+			border-radius: 10px;
+			padding: 8px 10px;
+		}
+
+		.volume-controls input[type="range"] {
+			width: 100%;
+		}
+
 		.video-wrap {
 			position: relative;
 			border-radius: 12px;
@@ -287,7 +302,12 @@
 						</div>
 						<div id="videoLockOverlay" class="video-lock-overlay hidden">Tylko gracz "sobik" steruje filmem</div>
 					</div>
-					<div class="score-controls">
+					<div class="volume-controls">
+						<span>Glosnosc</span>
+						<input id="volumeRange" type="range" min="0" max="100" step="1" value="100" />
+						<span id="volumeLabel">100%</span>
+					</div>
+					<div id="scoreControls" class="score-controls">
 						<button id="goodBtn" class="good-btn">Dobrze (+1)</button>
 						<button id="badBtn" class="bad-btn">Zle (-1)</button>
 					</div>
@@ -322,9 +342,12 @@
 		const statusEl = document.getElementById("status");
 		const ytInput = document.getElementById("ytInput");
 		const setVideoBtn = document.getElementById("setVideoBtn");
+		const volumeRange = document.getElementById("volumeRange");
+		const volumeLabel = document.getElementById("volumeLabel");
 		const videoWrap = document.getElementById("videoWrap");
 		const videoStage = document.getElementById("videoStage");
 		const videoLockOverlay = document.getElementById("videoLockOverlay");
+		const scoreControls = document.getElementById("scoreControls");
 		const goodBtn = document.getElementById("goodBtn");
 		const badBtn = document.getElementById("badBtn");
 		const myScore = document.getElementById("myScore");
@@ -345,9 +368,14 @@
 		let pendingVideoId = "";
 		let videoSyncTimer = null;
 		let isApplyingRemoteVideoState = false;
+		let localVolume = 100;
 
 		function getStorageKey(prefix) {
 			return "buzzer_" + prefix;
+		}
+
+		function getVolumeStorageKey() {
+			return getStorageKey("video_volume");
 		}
 
 		function safeName(value, player) {
@@ -463,6 +491,43 @@
 			videoControls.classList.toggle("hidden", !isVideoController());
 		}
 
+		function updateAdminActionsUi() {
+			scoreControls.classList.toggle("hidden", !isVideoController());
+		}
+
+		function clampVolume(value) {
+			const num = Number(value);
+			if (!Number.isFinite(num)) {
+				return 100;
+			}
+			if (num < 0) {
+				return 0;
+			}
+			if (num > 100) {
+				return 100;
+			}
+			return Math.round(num);
+		}
+
+		function updateVolumeLabel() {
+			volumeLabel.textContent = String(localVolume) + "%";
+		}
+
+		function loadLocalVolume() {
+			const raw = localStorage.getItem(getVolumeStorageKey());
+			localVolume = clampVolume(raw);
+			volumeRange.value = String(localVolume);
+			updateVolumeLabel();
+		}
+
+		function applyVolumeToPlayer() {
+			if (!ytPlayer || typeof ytPlayer.setVolume !== "function") {
+				return;
+			}
+			// Najważniejsze: glosnosc jest lokalna dla przegladarki i nie synchronizuje sie z innymi graczami.
+			ytPlayer.setVolume(localVolume);
+		}
+
 		function ensureYouTubeApi() {
 			if (window.YT && window.YT.Player) {
 				ytApiReady = true;
@@ -512,6 +577,7 @@
 				},
 				events: {
 					onReady: function() {
+						applyVolumeToPlayer();
 						syncVideoState();
 					},
 					onStateChange: function() {
@@ -691,6 +757,7 @@
 			isVideoPaused = Boolean(state.videoPaused);
 			updateVideoLockUi();
 			updateVideoControlsUi();
+			updateAdminActionsUi();
 			syncVideoState();
 
 			if (winner === null) {
@@ -802,7 +869,13 @@
 		}
 
 		async function updateScore(delta) {
-			if (!myPlayer || !isValidPlayer(myPlayer)) {
+			if (!isVideoController()) {
+				setStatus("punkty moze przyznawac tylko sobik");
+				return;
+			}
+			const targetPlayer = Number(currentState && currentState.winner);
+			if (!isValidPlayer(targetPlayer)) {
+				setStatus("najpierw ktos musi wygrac runde");
 				return;
 			}
 			goodBtn.disabled = true;
@@ -814,8 +887,8 @@
 						"Content-Type": "application/json"
 					},
 					body: JSON.stringify({
-						player: myPlayer,
 						name: myName,
+						targetPlayer: targetPlayer,
 						delta: delta
 					})
 				});
@@ -870,6 +943,13 @@
 				setVideo();
 			}
 		});
+		volumeRange.addEventListener("input", () => {
+			localVolume = clampVolume(volumeRange.value);
+			volumeRange.value = String(localVolume);
+			localStorage.setItem(getVolumeStorageKey(), String(localVolume));
+			updateVolumeLabel();
+			applyVolumeToPlayer();
+		});
 		window.addEventListener("pagehide", () => {
 			sendLeaveBeacon(myPlayer, myName);
 		});
@@ -894,8 +974,10 @@
 		if (window.location.hostname.indexOf("github.io") !== -1 && API_BASE_URL.indexOf("127.0.0.1") !== -1) {
 			setStatus("ustaw poprawny API_BASE_URL do zdalnego backendu");
 		}
+		loadLocalVolume();
 		updateVideoLockUi();
 		updateVideoControlsUi();
+		updateAdminActionsUi();
 		renderScoreboard();
 	</script>
 </body>
