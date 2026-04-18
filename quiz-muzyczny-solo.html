@@ -114,7 +114,7 @@
 		}
 		.guess-row--with-skip {
 			display: grid;
-			grid-template-columns: 1fr auto;
+			grid-template-columns: 1fr auto auto;
 			gap: 10px;
 			align-items: stretch;
 		}
@@ -328,6 +328,7 @@
 					<div class="guess-row guess-row--with-skip">
 						<input id="guessInput" class="guess-input-main" name="guess" type="text" placeholder="Artysta - tytul (Enter)" autocomplete="off" disabled />
 						<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>SKIP</button>
+						<button type="button" id="replayListenBtn" class="skip-phase-btn" disabled title="Ponownie od poczatku (tylko lokalnie)">Ponów</button>
 					</div>
 				</form>
 				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
@@ -353,6 +354,7 @@
 		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 		const myPlayer = 1;
 		const QUIZ_REVEAL_WAIT_MS = 11000;
+		const QUIZ_MAX_SKIPS = 4;
 
 		const startGameBtn = document.getElementById("startGameBtn");
 		const nextTrackBtn = document.getElementById("nextTrackBtn");
@@ -365,6 +367,7 @@
 		const guessForm = document.getElementById("guessForm");
 		const guessInput = document.getElementById("guessInput");
 		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
+		const replayListenBtn = document.getElementById("replayListenBtn");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
 		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
@@ -384,6 +387,8 @@
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
 		let guessSubmitInFlight = false;
+		let skipPhaseInFlight = false;
+		let localReplayGen = 0;
 		let soloRevealTimer = null;
 		let nextRoundBusy = false;
 
@@ -538,6 +543,7 @@
 				nextTrackBtn.disabled = false;
 				guessInput.disabled = true;
 				skipPhaseBtn.disabled = true;
+				replayListenBtn.disabled = true;
 				soloRevealTimer = setTimeout(function () {
 					nextTrackAfterReveal();
 				}, QUIZ_REVEAL_WAIT_MS);
@@ -547,7 +553,10 @@
 				revealPanel.classList.add("hidden");
 				nextTrackBtn.disabled = true;
 				guessInput.disabled = isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer) || !roundOn;
-				skipPhaseBtn.disabled = guessInput.disabled;
+				const skMapSolo = state.quizSkipsUsed || {};
+				const skipsSolo = Number(skMapSolo["1"] != null ? skMapSolo["1"] : 0);
+				skipPhaseBtn.disabled = guessInput.disabled || skipsSolo >= QUIZ_MAX_SKIPS;
+				replayListenBtn.disabled = guessInput.disabled;
 			}
 
 			const gh = state.quizGuessHistory && Array.isArray(state.quizGuessHistory["1"])
@@ -731,20 +740,20 @@
 			});
 		}
 
-		async function playQuizClipFromState(state) {
+		function resolveQuizListenDurationSolo(state) {
 			const previewUrl = String(state.quizPreviewUrl || "").trim();
+			if (!previewUrl) {
+				return 0;
+			}
 			const reveal = Boolean(state.quizRevealActive);
 			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
 			let durationSec = Number(state.quizCommandDurationSec || 0);
-			if (!previewUrl) {
-				return;
-			}
 			if (!reveal && !seekMiddle) {
 				if (isPlayerGuessed(myPlayer)) {
-					return;
+					return 0;
 				}
 				if (isQuizWrong(myPlayer)) {
-					return;
+					return 0;
 				}
 				const durs = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
 				const lpMap = state.quizListenPhases || {};
@@ -758,6 +767,42 @@
 					durationSec = tier;
 				}
 			}
+			return durationSec > 0 ? durationSec : 0;
+		}
+
+		async function replayLocalQuizClip() {
+			const dur = resolveQuizListenDurationSolo(currentState);
+			if (dur <= 0) {
+				return;
+			}
+			localReplayGen = localReplayGen + 1;
+			const gen = localReplayGen;
+			quizAudio.volume = localVolume / 100;
+			try {
+				await seekQuizAudioToStart();
+				if (gen !== localReplayGen) {
+					return;
+				}
+				await quizAudio.play();
+				startClipProgress(0, dur, false);
+				if (clipStopTimer) {
+					clearTimeout(clipStopTimer);
+				}
+				clipStopTimer = setTimeout(function () {
+					stopCurrentClip();
+				}, dur * 1000);
+			} catch (err0) {
+				setStatus("nie mozna odtworzyc ponownie");
+			}
+		}
+
+		async function playQuizClipFromState(state) {
+			const previewUrl = String(state.quizPreviewUrl || "").trim();
+			const reveal = Boolean(state.quizRevealActive);
+			if (!previewUrl) {
+				return;
+			}
+			const durationSec = resolveQuizListenDurationSolo(state);
 			if (durationSec <= 0) {
 				return;
 			}
@@ -882,9 +927,13 @@
 		}
 
 		async function skipPhase() {
+			if (skipPhaseInFlight) {
+				return;
+			}
 			if (!sessionId || guessInput.disabled) {
 				return;
 			}
+			skipPhaseInFlight = true;
 			try {
 				const data = await fetchJson("/api/quiz-solo/skip-phase", {
 					method: "POST",
@@ -895,6 +944,8 @@
 				setStatus("online");
 			} catch (err) {
 				setStatus(err && err.message ? String(err.message) : "blad");
+			} finally {
+				skipPhaseInFlight = false;
 			}
 		}
 
@@ -1036,6 +1087,9 @@
 			markGuess();
 		});
 		skipPhaseBtn.addEventListener("click", skipPhase);
+		replayListenBtn.addEventListener("click", function () {
+			replayLocalQuizClip();
+		});
 		startGameBtn.addEventListener("click", startNewGame);
 		nextTrackBtn.addEventListener("click", nextTrackAfterReveal);
 		submitLbBtn.addEventListener("click", submitLeaderboard);

@@ -24,6 +24,7 @@ ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
 QUIZ_SOLO_LEADERBOARD_FILE = os.path.join(DATA_DIR, "quiz_solo_leaderboard.json")
 SOLO_QUIZ_SESSIONS = {}
 SOLO_QUIZ_LOCK = threading.Lock()
+BUZZER_QUIZ_LOCK = threading.Lock()
 SOLO_SESSION_TTL_MS = 6 * 60 * 60 * 1000
 AVATAR_DIR = os.path.join(DATA_DIR, "avatars")
 AVATAR_PRESET_DIR = os.path.join(BASE_DIR, "avatar_presets")
@@ -754,6 +755,13 @@ class AppHandler(SimpleHTTPRequestHandler):
 		BUZZER_STATE["quiz_command_duration_sec"] = self._max_listen_sec_still_in_round()
 		BUZZER_STATE["quiz_command_issued_ms"] = self._now_ms()
 
+	def _refresh_quiz_listen_duration_no_token(self):
+		# Najważniejsze: przelicz max czas słuchu bez podbijania quiz_command_token — bez ponownego startu klipu u wszystkich.
+		self._ensure_quiz_state()
+		BUZZER_STATE["quiz_command_duration_sec"] = self._max_listen_sec_still_in_round()
+		BUZZER_STATE["quiz_command_issued_ms"] = self._now_ms()
+		BUZZER_STATE["last_update_ms"] = self._now_ms()
+
 	def _bump_quiz_listen_for_player(self, key):
 		# Najważniejsze: tylko ten gracz dostaje nowy odsłuch (wyższy tier) — bez przerywania pozostałym.
 		self._ensure_quiz_state()
@@ -1428,13 +1436,18 @@ class AppHandler(SimpleHTTPRequestHandler):
 				last_i = len(QUIZ_PHASE_DURATIONS) - 1
 				if cur < last_i:
 					sess["listen_phase"] = cur + 1
-				nidx = int(sess["listen_phase"])
-				sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
-				sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
-				sess["issued_ms"] = self._now_ms()
-				with SOLO_QUIZ_LOCK:
-					SOLO_QUIZ_SESSIONS[sess["token"]] = sess
-				self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_solo_state(sess)}, 200)
+					nidx = int(sess["listen_phase"])
+					sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+					sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+					sess["issued_ms"] = self._now_ms()
+					with SOLO_QUIZ_LOCK:
+						SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+					self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_solo_state(sess)}, 200)
+					return
+				sess["artist_hint"] = False
+				sess["wrong"] = True
+				self._solo_begin_reveal(sess)
+				self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_solo_state(sess)}, 200)
 				return
 			sess["artist_hint"] = False
 			cur = int(sess.get("listen_phase", 0))
@@ -1451,7 +1464,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"ok": True, "guessWrong": True, "state": self._public_solo_state(sess)}, 200)
 				return
 			sess["wrong"] = True
-			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
 			self._solo_begin_reveal(sess)
 			self.json_response({"ok": True, "guessWrong": True, "state": self._public_solo_state(sess)}, 200)
 		except Exception as ex:
@@ -1495,7 +1507,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
 				return
 			sess["wrong"] = True
-			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
 			self._solo_begin_reveal(sess)
 			self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
 		except Exception as ex:
@@ -2851,156 +2862,171 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def handle_quiz_skip_phase_post(self):
 		# Najważniejsze: gracz dobrowolnie przechodzi do dłuższej fazy bez wpisywania odpowiedzi (jak zła odpowiedź przed ostatnią fazą).
 		try:
-			self._ensure_round_started()
-			self._ensure_scores_and_names()
-			self._ensure_quiz_state()
-			length = int(self.headers.get("Content-Length", "0"))
-			raw = self.rfile.read(length)
-			parsed = json.loads(raw.decode("utf-8"))
-			if not isinstance(parsed, dict):
-				self.json_response({"error": "Payload must be an object"}, 400)
-				return
-			player = self._sanitize_player(parsed.get("player"))
-			if player is None:
-				self.json_response({"error": "Invalid player number"}, 400)
-				return
-			name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
-			key = str(player)
-			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
-			if not self._same_name(current_name, name):
-				self.json_response({"error": "Player identity mismatch"}, 403)
-				return
-			if bool(BUZZER_STATE.get("quiz_reveal_active")):
-				self.json_response({"error": "Reveal is active"}, 400)
-				return
-			if not bool(BUZZER_STATE.get("quiz_round_active")):
-				self.json_response({"error": "Quiz round is not active"}, 400)
-				return
-			if bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
-				self.json_response({"ok": True, "alreadyGuessed": True, "state": self._public_buzzer_state()}, 200)
-				return
-			if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
-				self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
-				return
-			su = BUZZER_STATE.get("quiz_skips_used")
-			if not isinstance(su, dict):
-				BUZZER_STATE["quiz_skips_used"] = {}
-				su = BUZZER_STATE["quiz_skips_used"]
-			prev_skip = int(su.get(key, 0))
-			if prev_skip >= QUIZ_MAX_SKIPS_PER_ROUND:
-				self.json_response({"error": "Wykorzystales juz max skipow (4) w tej rundzie"}, 400)
-				return
-			su[key] = prev_skip + 1
-			BUZZER_STATE["quiz_artist_hint_players"][key] = False
-			lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-			self._append_quiz_guess_history(key, "SKIP", "skip")
-			if cur < last_i:
-				lp[key] = cur + 1
-				self._bump_quiz_listen_for_player(key)
+			with BUZZER_QUIZ_LOCK:
+				self._ensure_round_started()
+				self._ensure_scores_and_names()
+				self._ensure_quiz_state()
+				length = int(self.headers.get("Content-Length", "0"))
+				raw = self.rfile.read(length)
+				parsed = json.loads(raw.decode("utf-8"))
+				if not isinstance(parsed, dict):
+					self.json_response({"error": "Payload must be an object"}, 400)
+					return
+				player = self._sanitize_player(parsed.get("player"))
+				if player is None:
+					self.json_response({"error": "Invalid player number"}, 400)
+					return
+				name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
+				key = str(player)
+				current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+				if not self._same_name(current_name, name):
+					self.json_response({"error": "Player identity mismatch"}, 403)
+					return
+				if bool(BUZZER_STATE.get("quiz_reveal_active")):
+					self.json_response({"error": "Reveal is active"}, 400)
+					return
+				if not bool(BUZZER_STATE.get("quiz_round_active")):
+					self.json_response({"error": "Quiz round is not active"}, 400)
+					return
+				if bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
+					self.json_response({"ok": True, "alreadyGuessed": True, "state": self._public_buzzer_state()}, 200)
+					return
+				if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
+					self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
+					return
+				su = BUZZER_STATE.get("quiz_skips_used")
+				if not isinstance(su, dict):
+					BUZZER_STATE["quiz_skips_used"] = {}
+					su = BUZZER_STATE["quiz_skips_used"]
+				prev_skip = int(su.get(key, 0))
+				if prev_skip >= QUIZ_MAX_SKIPS_PER_ROUND:
+					self.json_response({"error": "Wykorzystales juz max skipow (4) w tej rundzie"}, 400)
+					return
+				su[key] = prev_skip + 1
+				BUZZER_STATE["quiz_artist_hint_players"][key] = False
+				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
+				self._append_quiz_guess_history(key, "SKIP", "skip")
+				if cur < last_i:
+					lp[key] = cur + 1
+					self._bump_quiz_listen_for_player(key)
+					if self._all_occupied_finished_song():
+						self._begin_quiz_reveal()
+					self.json_response({"ok": True, "skippedPhase": True, "state": self._public_buzzer_state()}, 200)
+					return
+				BUZZER_STATE["quiz_wrong_players"][key] = True
+				prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
+				if not isinstance(prev, list):
+					prev = []
+					BUZZER_STATE["quiz_wrong_guesses"][key] = prev
+				prev.append("SKIP (ostatnia faza)")
+				# Najważniejsze: bez podbicia quiz_command_token — inaczej wszyscy słyszą klip od nowa po ostatnim skipie.
+				self._refresh_quiz_listen_duration_no_token()
 				if self._all_occupied_finished_song():
 					self._begin_quiz_reveal()
 				self.json_response({"ok": True, "skippedPhase": True, "state": self._public_buzzer_state()}, 200)
 				return
-			BUZZER_STATE["quiz_wrong_players"][key] = True
-			prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
-			if not isinstance(prev, list):
-				prev = []
-				BUZZER_STATE["quiz_wrong_guesses"][key] = prev
-			prev.append("SKIP (ostatnia faza)")
-			BUZZER_STATE["last_update_ms"] = self._now_ms()
-			self._bump_quiz_listen_clip()
-			if self._all_occupied_finished_song():
-				self._begin_quiz_reveal()
-			self.json_response({"ok": True, "skippedPhase": True, "state": self._public_buzzer_state()}, 200)
-			return
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
 	def handle_quiz_guess_post(self):
 		try:
-			self._ensure_round_started()
-			self._ensure_scores_and_names()
-			self._ensure_quiz_state()
-			length = int(self.headers.get("Content-Length", "0"))
-			raw = self.rfile.read(length)
-			parsed = json.loads(raw.decode("utf-8"))
-			if not isinstance(parsed, dict):
-				self.json_response({"error": "Payload must be an object"}, 400)
-				return
-			player = self._sanitize_player(parsed.get("player"))
-			if player is None:
-				self.json_response({"error": "Invalid player number"}, 400)
-				return
-			name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
-			key = str(player)
-			current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
-			if not self._same_name(current_name, name):
-				self.json_response({"error": "Player identity mismatch"}, 403)
-				return
-			if not bool(BUZZER_STATE.get("quiz_round_active")):
-				self.json_response({"error": "Quiz round is not active"}, 400)
-				return
-			if bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
-				self.json_response({"ok": True, "alreadyGuessed": True, "state": self._public_buzzer_state()}, 200)
-				return
-			if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
-				self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
-				return
-			guess = str(parsed.get("guess", "")).strip()
-			if len(guess) < 3:
-				self.json_response({"error": "Za krotka odpowiedz"}, 400)
-				return
-			title = str(BUZZER_STATE.get("quiz_track_title", "") or "")
-			artist = str(BUZZER_STATE.get("quiz_track_artist", "") or "")
-			if self._guess_matches_deezer(guess, title, artist):
+			with BUZZER_QUIZ_LOCK:
+				self._ensure_round_started()
+				self._ensure_scores_and_names()
+				self._ensure_quiz_state()
+				length = int(self.headers.get("Content-Length", "0"))
+				raw = self.rfile.read(length)
+				parsed = json.loads(raw.decode("utf-8"))
+				if not isinstance(parsed, dict):
+					self.json_response({"error": "Payload must be an object"}, 400)
+					return
+				player = self._sanitize_player(parsed.get("player"))
+				if player is None:
+					self.json_response({"error": "Invalid player number"}, 400)
+					return
+				name = self._sanitize_name(parsed.get("name"), _default_name_for_player(player))
+				key = str(player)
+				current_name = BUZZER_STATE["player_names"].get(key, _default_name_for_player(player))
+				if not self._same_name(current_name, name):
+					self.json_response({"error": "Player identity mismatch"}, 403)
+					return
+				if not bool(BUZZER_STATE.get("quiz_round_active")):
+					self.json_response({"error": "Quiz round is not active"}, 400)
+					return
+				if bool(BUZZER_STATE["quiz_guessed_players"].get(key)):
+					self.json_response({"ok": True, "alreadyGuessed": True, "state": self._public_buzzer_state()}, 200)
+					return
+				if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
+					self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
+					return
+				guess = str(parsed.get("guess", "")).strip()
+				if len(guess) < 3:
+					self.json_response({"error": "Za krotka odpowiedz"}, 400)
+					return
+				title = str(BUZZER_STATE.get("quiz_track_title", "") or "")
+				artist = str(BUZZER_STATE.get("quiz_track_artist", "") or "")
+				if self._guess_matches_deezer(guess, title, artist):
+					BUZZER_STATE["quiz_artist_hint_players"][key] = False
+					points = self._quiz_points_for_player_key(key)
+					BUZZER_STATE["quiz_guessed_players"][key] = True
+					BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + points
+					self._append_quiz_guess_history(key, guess, "correct")
+					BUZZER_STATE["last_update_ms"] = self._now_ms()
+					if self._all_occupied_finished_song():
+						self._begin_quiz_reveal()
+					self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+					return
+				if self._artist_only_matches_round(guess, title, artist):
+					self._append_quiz_guess_history(key, guess, "artist_hint")
+					BUZZER_STATE["quiz_artist_hint_players"][key] = True
+					lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
+					if cur < last_i:
+						lp[key] = cur + 1
+						self._bump_quiz_listen_for_player(key)
+						if self._all_occupied_finished_song():
+							self._begin_quiz_reveal()
+						self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
+						return
+					# Najważniejsze: na ostatniej fazie sam artysta = odpad (wcześniej każde wysłanie podbijało listen_token w nieskończoność).
+					BUZZER_STATE["quiz_artist_hint_players"][key] = False
+					BUZZER_STATE["quiz_wrong_players"][key] = True
+					prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
+					if not isinstance(prev, list):
+						prev = []
+						BUZZER_STATE["quiz_wrong_guesses"][key] = prev
+					prev.append(guess[:200])
+					self._refresh_quiz_listen_duration_no_token()
+					if self._all_occupied_finished_song():
+						self._begin_quiz_reveal()
+					self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_buzzer_state()}, 200)
+					return
 				BUZZER_STATE["quiz_artist_hint_players"][key] = False
-				points = self._quiz_points_for_player_key(key)
-				BUZZER_STATE["quiz_guessed_players"][key] = True
-				BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + points
-				self._append_quiz_guess_history(key, guess, "correct")
-				BUZZER_STATE["last_update_ms"] = self._now_ms()
-				if self._all_occupied_finished_song():
-					self._begin_quiz_reveal()
-				self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
-				return
-			if self._artist_only_matches_round(guess, title, artist):
-				self._append_quiz_guess_history(key, guess, "artist_hint")
-				BUZZER_STATE["quiz_artist_hint_players"][key] = True
 				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
+				self._append_quiz_guess_history(key, guess, "wrong")
 				if cur < last_i:
 					lp[key] = cur + 1
-				self._bump_quiz_listen_for_player(key)
-				if self._all_occupied_finished_song():
-					self._begin_quiz_reveal()
-				self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
-				return
-			BUZZER_STATE["quiz_artist_hint_players"][key] = False
-			lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-			self._append_quiz_guess_history(key, guess, "wrong")
-			if cur < last_i:
-				lp[key] = cur + 1
+					prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
+					if not isinstance(prev, list):
+						prev = []
+						BUZZER_STATE["quiz_wrong_guesses"][key] = prev
+					prev.append(guess[:200])
+					self._bump_quiz_listen_for_player(key)
+					if self._all_occupied_finished_song():
+						self._begin_quiz_reveal()
+					self.json_response({"ok": True, "guessWrong": True, "state": self._public_buzzer_state()}, 200)
+					return
+				BUZZER_STATE["quiz_wrong_players"][key] = True
 				prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
 				if not isinstance(prev, list):
 					prev = []
 					BUZZER_STATE["quiz_wrong_guesses"][key] = prev
 				prev.append(guess[:200])
-				self._bump_quiz_listen_for_player(key)
+				BUZZER_STATE["last_update_ms"] = self._now_ms()
+				self._bump_quiz_listen_clip()
 				if self._all_occupied_finished_song():
 					self._begin_quiz_reveal()
 				self.json_response({"ok": True, "guessWrong": True, "state": self._public_buzzer_state()}, 200)
 				return
-			BUZZER_STATE["quiz_wrong_players"][key] = True
-			prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
-			if not isinstance(prev, list):
-				prev = []
-				BUZZER_STATE["quiz_wrong_guesses"][key] = prev
-			prev.append(guess[:200])
-			BUZZER_STATE["last_update_ms"] = self._now_ms()
-			self._bump_quiz_listen_clip()
-			if self._all_occupied_finished_song():
-				self._begin_quiz_reveal()
-			self.json_response({"ok": True, "guessWrong": True, "state": self._public_buzzer_state()}, 200)
-			return
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 

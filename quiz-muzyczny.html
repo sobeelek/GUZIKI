@@ -353,7 +353,7 @@
 
 		.guess-row--with-skip {
 			display: grid;
-			grid-template-columns: 1fr auto;
+			grid-template-columns: 1fr auto auto;
 			gap: 10px;
 			align-items: stretch;
 		}
@@ -673,6 +673,9 @@
 						<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>
 							SKIP
 						</button>
+						<button type="button" id="replayListenBtn" class="skip-phase-btn" disabled title="Ponownie od poczatku (tylko u Ciebie)">
+							Ponów
+						</button>
 					</div>
 				</form>
 				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
@@ -709,6 +712,7 @@
 		const VIDEO_CONTROLLER_NAME = "sobik";
 		const MAX_PLAYERS = 8;
 		const AUTO_PHASE_DELAY_MS = 700;
+		const QUIZ_MAX_SKIPS = 4;
 		const meInfo = document.getElementById("meInfo");
 		const revealPanel = document.getElementById("revealPanel");
 		const adminRoundControls = document.getElementById("adminRoundControls");
@@ -728,6 +732,7 @@
 		const guessForm = document.getElementById("guessForm");
 		const guessInput = document.getElementById("guessInput");
 		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
+		const replayListenBtn = document.getElementById("replayListenBtn");
 		const quizPhaseBadge = document.getElementById("quizPhaseBadge");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
@@ -769,6 +774,8 @@
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
 		let guessSubmitInFlight = false;
+		let skipPhaseInFlight = false;
+		let localReplayGen = 0;
 		let quizEndOverlayDismissed = false;
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
@@ -1320,20 +1327,20 @@
 			});
 		}
 
-		async function playQuizClipFromState(state) {
+		function resolveQuizListenDurationForMe(state) {
 			const previewUrl = String(state.quizPreviewUrl || "").trim();
+			if (!previewUrl) {
+				return 0;
+			}
 			const reveal = Boolean(state.quizRevealActive);
 			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
 			let durationSec = Number(state.quizCommandDurationSec || 0);
-			if (!previewUrl) {
-				return;
-			}
 			if (!reveal && !seekMiddle) {
 				if (isPlayerGuessed(myPlayer)) {
-					return;
+					return 0;
 				}
 				if (isQuizWrong(myPlayer)) {
-					return;
+					return 0;
 				}
 				const durs = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
 				const lpMap = state.quizListenPhases || {};
@@ -1347,6 +1354,43 @@
 					durationSec = tier;
 				}
 			}
+			return durationSec > 0 ? durationSec : 0;
+		}
+
+		async function replayLocalQuizClip() {
+			const state = currentState;
+			const dur = resolveQuizListenDurationForMe(state);
+			if (dur <= 0) {
+				return;
+			}
+			localReplayGen = localReplayGen + 1;
+			const gen = localReplayGen;
+			applyVolume();
+			try {
+				await seekQuizAudioToStart();
+				if (gen !== localReplayGen) {
+					return;
+				}
+				await quizAudio.play();
+				startClipProgress(0, dur, false);
+				if (clipStopTimer) {
+					clearTimeout(clipStopTimer);
+				}
+				clipStopTimer = setTimeout(function () {
+					stopCurrentClip();
+				}, dur * 1000);
+			} catch (err0) {
+				setStatus("nie mozna odtworzyc ponownie");
+			}
+		}
+
+		async function playQuizClipFromState(state) {
+			const previewUrl = String(state.quizPreviewUrl || "").trim();
+			const reveal = Boolean(state.quizRevealActive);
+			if (!previewUrl) {
+				return;
+			}
+			const durationSec = resolveQuizListenDurationForMe(state);
 			if (durationSec <= 0) {
 				return;
 			}
@@ -1503,8 +1547,11 @@
 				guessHistoryPanel.innerHTML = "";
 				guessHistoryPanel.classList.add("hidden");
 			}
+			const skipsMapEarly = state.quizSkipsUsed || {};
+			const skipsUsedEarly = Number(skipsMapEarly[String(myPlayer)] != null ? skipsMapEarly[String(myPlayer)] : 0);
 			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
-			skipPhaseBtn.disabled = guessInput.disabled;
+			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS;
+			replayListenBtn.disabled = !roundOn || revealOn || isPlayerGuessed(myPlayer) || myWrong;
 			const dursBadge = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
 			const ptsBadge = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [4, 3, 2, 1];
 			const lpMapB = state.quizListenPhases || {};
@@ -1515,8 +1562,7 @@
 			idxB = Math.max(0, Math.min(Math.floor(idxB), dursBadge.length - 1));
 			const secB = Number(dursBadge[idxB]);
 			const ptB = ptsBadge[idxB] !== undefined ? ptsBadge[idxB] : 4;
-			const skipsMap = state.quizSkipsUsed || {};
-			const skipsUsed = Number(skipsMap[String(myPlayer)] != null ? skipsMap[String(myPlayer)] : 0);
+			const skipsUsed = skipsUsedEarly;
 			if (roundOn && !revealOn && !myWrong && !isPlayerGuessed(myPlayer) && Number.isFinite(secB)) {
 				quizPhaseBadge.textContent =
 					"Faza " +
@@ -1579,12 +1625,16 @@
 		}
 
 		async function skipPhase() {
+			if (skipPhaseInFlight) {
+				return;
+			}
 			if (!myPlayer || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
 				return;
 			}
 			if (guessInput.disabled) {
 				return;
 			}
+			skipPhaseInFlight = true;
 			try {
 				const data = await fetchJson("/api/quiz-skip-phase", {
 					method: "POST",
@@ -1597,6 +1647,8 @@
 				const msg = err && err.message ? String(err.message) : "blad";
 				setStatus(msg);
 				refreshState();
+			} finally {
+				skipPhaseInFlight = false;
 			}
 		}
 
@@ -1729,6 +1781,9 @@
 			markGuess();
 		});
 		skipPhaseBtn.addEventListener("click", skipPhase);
+		replayListenBtn.addEventListener("click", function () {
+			replayLocalQuizClip();
+		});
 		quizEndCloseBtn.addEventListener("click", dismissQuizEndOverlay);
 		quizEndOverlay.addEventListener("click", function (ev) {
 			if (ev.target === quizEndOverlay) {
