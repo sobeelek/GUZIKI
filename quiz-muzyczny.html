@@ -324,7 +324,7 @@
 	<div class="app-layout">
 		<div class="panel">
 			<h1>Quiz muzyczny Deezer</h1>
-			<p class="info">Zasada: jedna runda 16 s fragmentu od poczatku preview Deezer. Zla odpowiedz (bez trafienia artysty) = koniec zgadywania w tej piosence, lista prob na czerwono. Podpowiedz: wpisz fragment — propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta — dopisz tytul. Po rundzie lub gdy wszyscy trafia: ujawnienie ~10 s ze srodka + podpis, potem Gotowy i nastepna piosenka.</p>
+			<p class="info">Zasada: fazy 1 s / 3 s / 8 s / 14 s fragmentu od poczatku preview Deezer (coraz mniej punktow). Zla odpowiedz (bez trafienia artysty) = koniec zgadywania w tej piosence, lista prob na czerwono. Podpowiedz: wpisz fragment — propozycje z Deezer. Zielono = cale trafienie, zolto = trafiony tylko artysta — dopisz tytul. Po ostatniej fazie lub gdy wszyscy trafia: ujawnienie ~10 s ze srodka + podpis, potem Gotowy i nastepna piosenka.</p>
 			<p class="me" id="meInfo"></p>
 			<p id="musicTypeLine" class="quiz-state">Typ muzyki: laczenie...</p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
@@ -361,7 +361,7 @@
 				</div>
 				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
 			</div>
-			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na koniec 16 s.</p>
+			<p id="result" class="result">Wpisz odpowiedz i sprawdz — albo czekaj na kolejna faze (1s/3s/8s/14s).</p>
 			<div id="wrongGuessPanel" class="wrong-guess-panel hidden" aria-live="polite"></div>
 
 			<div class="bottom-actions">
@@ -435,6 +435,7 @@
 		let suggestHideTimer = null;
 
 		const MUSIC_PRESETS = [
+			{ value: "hip hop [2022-2026]", label: "Hip hop 2022-2026" },
 			{ value: "polski hip hop", label: "Polski hip hop" },
 			{ value: "polska muzyka", label: "Polska muzyka" },
 			{ value: "rock", label: "Rock" },
@@ -861,7 +862,7 @@
 				} else if (roundOn) {
 					result.textContent = isPlayerGuessed(myPlayer)
 						? "Zgadles — czekasz na ujawnienie."
-						: "Sluchaj (16 s) i wpisz artyste oraz tytul.";
+						: "Sluchaj (fazy 1s/3s/8s/14s) i wpisz artyste oraz tytul.";
 				} else if (revealOn) {
 					result.textContent = "Faza ujawnienia — sluchaj ~10s fragmentu ze srodka.";
 				}
@@ -869,7 +870,7 @@
 			updateReadyUi();
 			const phaseIndex = Number(state.quizPhaseIndex || -1);
 			const phaseDuration = Number(state.quizCommandDurationSec || 0);
-			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [3];
+			const phasePoints = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [5, 3, 2, 1];
 			const readyCount = Number(state.quizReadyCount || 0);
 			const occupiedCount = Number(state.quizOccupiedCount || 0);
 			if (revealOn) {
@@ -954,7 +955,7 @@
 					body: JSON.stringify({ name: myName })
 				});
 				updateByState(data.state);
-				setStatus("start rundy 16s");
+				setStatus("start rundy (1s)");
 			} catch (err) {
 				setStatus("blad startu rundy");
 			}

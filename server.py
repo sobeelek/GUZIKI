@@ -23,8 +23,11 @@ MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
 VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
 DEEZER_POLISH_HIPHOP_QUERY = "polski hip hop"
-QUIZ_PHASE_DURATIONS = [16]
-QUIZ_PHASE_POINTS = [3]
+QUIZ_HIPHOP_YEAR_RANGE_QUERY = "hip hop [2022-2026]"
+QUIZ_HIPHOP_YEAR_MIN = 2022
+QUIZ_HIPHOP_YEAR_MAX = 2026
+QUIZ_PHASE_DURATIONS = [1, 3, 8, 14]
+QUIZ_PHASE_POINTS = [5, 3, 2, 1]
 QUIZ_REVEAL_CLIP_SEC = 10
 
 
@@ -463,7 +466,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _pick_random_quiz_track(self):
 		# Najważniejsze: losowy utwór z puli wyników Deezer dla zapytania ustawionego przez sobika.
 		query = self._current_quiz_music_query()
-		tracks = self._fetch_deezer_tracks(query, 50)
+		if str(query).strip() == QUIZ_HIPHOP_YEAR_RANGE_QUERY:
+			tracks = self._fetch_deezer_tracks_hiphop_year_range(50)
+			if not tracks:
+				tracks = self._fetch_deezer_tracks("hip hop", 50)
+		else:
+			tracks = self._fetch_deezer_tracks(query, 50)
 		if not tracks:
 			return None
 		random.shuffle(tracks)
@@ -1101,6 +1109,44 @@ class AppHandler(SimpleHTTPRequestHandler):
 			raw = response.read().decode("utf-8", errors="replace")
 		return json.loads(raw)
 
+	def _deezer_track_release_year(self, item):
+		album = item.get("album") or {}
+		rd = str(album.get("release_date") or "").strip()
+		if len(rd) >= 4 and rd[:4].isdigit():
+			try:
+				return int(rd[:4])
+			except Exception:
+				return None
+		return None
+
+	def _fetch_deezer_tracks_hiphop_year_range(self, out_cap):
+		# Najważniejsze: kilka zapytań + strony Deezer, tylko utwory z albumem w latach 2022–2026.
+		terms = ("hip hop", "rap", "trap")
+		out = []
+		seen = set()
+		for term in terms:
+			for index in (0, 50, 100):
+				if len(out) >= out_cap * 4:
+					break
+				url = "https://api.deezer.com/search?" + urlencode({"q": term, "limit": 50, "index": index})
+				try:
+					parsed = self._fetch_deezer_url_json(url)
+				except Exception:
+					continue
+				for item in parsed.get("data") or []:
+					y = self._deezer_track_release_year(item)
+					if y is None or y < QUIZ_HIPHOP_YEAR_MIN or y > QUIZ_HIPHOP_YEAR_MAX:
+						continue
+					rec = self._deezer_track_to_suggest_dict(item)
+					if not rec:
+						continue
+					tid = str(rec.get("id") or "").strip()
+					if not tid or tid in seen:
+						continue
+					seen.add(tid)
+					out.append(rec)
+		return out[:120]
+
 	def _deezer_track_to_suggest_dict(self, item):
 		preview = str(item.get("preview") or "").strip()
 		if not preview:
@@ -1425,7 +1471,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			current_index = int(BUZZER_STATE.get("quiz_phase_index", -1))
 			last_idx = len(QUIZ_PHASE_DURATIONS) - 1
 			if current_index >= last_idx:
-				# Najważniejsze: po ostatniej fazie (16s) przechodzimy do ~10s z srodka preview + podpis utworu.
+				# Najważniejsze: po ostatniej fazie (14s) przechodzimy do ~10s z srodka preview + podpis utworu.
 				self._begin_quiz_reveal()
 				self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 				return
