@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Szybki buzzer online</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: Arial, sans-serif;
+		}
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: #111827;
+			color: #f9fafb;
+		}
+
+		.panel {
+			width: min(760px, 95vw);
+			padding: 28px;
+			border-radius: 16px;
+			background: #1f2937;
+			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+			text-align: center;
+		}
+
+		h1 {
+			margin: 0 0 12px;
+			font-size: 28px;
+		}
+
+		.info {
+			margin: 0 0 16px;
+			font-size: 16px;
+			color: #d1d5db;
+		}
+
+		.setup {
+			display: grid;
+			gap: 12px;
+			max-width: 420px;
+			margin: 0 auto;
+		}
+
+		.field {
+			display: flex;
+			flex-direction: column;
+			text-align: left;
+			gap: 6px;
+		}
+
+		label {
+			font-size: 14px;
+			color: #9ca3af;
+		}
+
+		input,
+		select {
+			border: 1px solid #374151;
+			border-radius: 10px;
+			background: #0b1220;
+			color: #f9fafb;
+			padding: 10px 12px;
+			font-size: 16px;
+		}
+
+		.primary {
+			background: #2563eb;
+		}
+
+		button {
+			border: 0;
+			border-radius: 12px;
+			padding: 12px 14px;
+			font-size: 16px;
+			font-weight: bold;
+			background: #374151;
+			color: #fff;
+			cursor: pointer;
+			transition: transform 0.08s ease, background 0.2s ease;
+		}
+
+		button:hover {
+			background: #1d4ed8;
+		}
+
+		button:active {
+			transform: scale(0.97);
+		}
+
+		button[disabled] {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
+
+		.hidden {
+			display: none;
+		}
+
+		.buzzer-area {
+			display: grid;
+			gap: 14px;
+		}
+
+		.big-buzzer {
+			padding: 34px 10px;
+			font-size: clamp(34px, 10vw, 84px);
+			border-radius: 16px;
+			background: #2563eb;
+		}
+
+		.winner {
+			background: #059669 !important;
+		}
+
+		.result {
+			min-height: 34px;
+			margin-top: 8px;
+			font-size: 24px;
+			font-weight: 700;
+		}
+
+		.me {
+			font-size: 15px;
+			color: #9ca3af;
+		}
+
+		.actions {
+			margin-top: 14px;
+			display: flex;
+			justify-content: center;
+			gap: 10px;
+		}
+
+		.status {
+			margin-top: 8px;
+			font-size: 13px;
+			color: #9ca3af;
+		}
+	</style>
+</head>
+<body>
+	<div class="panel">
+		<h1>Kto pierwszy, ten odpowiada</h1>
+		<p class="info">Kazdy widzi tylko swoj guzik, a klik jednego blokuje runde u wszystkich.</p>
+
+		<div id="setupView" class="setup">
+			<div class="field">
+				<label for="playerSelect">Twoj numer gracza</label>
+				<select id="playerSelect">
+					<option value="1">Gracz 1</option>
+					<option value="2">Gracz 2</option>
+					<option value="3">Gracz 3</option>
+				</select>
+			</div>
+			<div class="field">
+				<label for="nickInput">Twoja ksywka</label>
+				<input id="nickInput" type="text" maxlength="20" value="" placeholder="np. Kosa" />
+			</div>
+			<button id="joinBtn" class="primary">Wejdz do gry</button>
+		</div>
+
+		<div id="gameView" class="buzzer-area hidden">
+			<p class="me" id="meInfo"></p>
+			<button id="buzzerBtn" class="big-buzzer">KLIK</button>
+			<p class="result" id="result">Czekam na pierwszy klik...</p>
+			<div class="actions">
+				<button id="resetBtn">Reset rundy</button>
+				<button id="changeBtn">Zmien gracza</button>
+			</div>
+			<p id="status" class="status">Status: laczenie...</p>
+		</div>
+	</div>
+
+	<script>
+		// Najwazniejsze: domyslnie uzywamy tego samego hosta co strona, a recznie mozna nadpisac window.API_BASE_URL.
+		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
+
+		const setupView = document.getElementById("setupView");
+		const gameView = document.getElementById("gameView");
+		const playerSelect = document.getElementById("playerSelect");
+		const nickInput = document.getElementById("nickInput");
+		const joinBtn = document.getElementById("joinBtn");
+		const meInfo = document.getElementById("meInfo");
+		const buzzerBtn = document.getElementById("buzzerBtn");
+		const result = document.getElementById("result");
+		const resetBtn = document.getElementById("resetBtn");
+		const changeBtn = document.getElementById("changeBtn");
+		const statusEl = document.getElementById("status");
+
+		let myPlayer = null;
+		let myName = "";
+		let currentState = null;
+		let pollTimer = null;
+
+		function getStorageKey(prefix) {
+			return "buzzer_" + prefix;
+		}
+
+		function safeName(value, player) {
+			const text = String(value || "").trim();
+			if (text.length > 0) {
+				return text.slice(0, 20);
+			}
+			return "Gracz " + player;
+		}
+
+		function buildApiUrl(path) {
+			const base = String(API_BASE_URL || "").replace(/\/+$/, "");
+			return base + path;
+		}
+
+		function setStatus(text) {
+			statusEl.textContent = "Status: " + text;
+		}
+
+		function setJoinedUi(isJoined) {
+			setupView.classList.toggle("hidden", isJoined);
+			gameView.classList.toggle("hidden", !isJoined);
+		}
+
+		function persistIdentity() {
+			localStorage.setItem(getStorageKey("player"), String(myPlayer));
+			localStorage.setItem(getStorageKey("name"), myName);
+		}
+
+		function restoreIdentity() {
+			const storedPlayer = localStorage.getItem(getStorageKey("player"));
+			const storedName = localStorage.getItem(getStorageKey("name"));
+			if (storedPlayer === "1" || storedPlayer === "2" || storedPlayer === "3") {
+				playerSelect.value = storedPlayer;
+			}
+			if (storedName) {
+				nickInput.value = storedName;
+			}
+		}
+
+		function updateByState(state) {
+			currentState = state;
+			const winner = state.winner;
+			const winnerName = state.winnerName || ("Gracz " + winner);
+			const winnerTime = state.winnerTimeMs;
+			buzzerBtn.classList.remove("winner");
+
+			if (winner === null) {
+				result.textContent = "Czekam na pierwszy klik...";
+				buzzerBtn.disabled = false;
+				return;
+			}
+
+			result.textContent = winnerName + " kliknal(a) pierwszy! Czas: " + winnerTime + " ms";
+			buzzerBtn.disabled = true;
+			if (Number(winner) === Number(myPlayer)) {
+				buzzerBtn.classList.add("winner");
+			}
+		}
+
+		async function fetchJson(url, options) {
+			const response = await fetch(buildApiUrl(url), options || {});
+			if (!response.ok) {
+				throw new Error("HTTP " + response.status);
+			}
+			return await response.json();
+		}
+
+		async function refreshState() {
+			try {
+				const state = await fetchJson("/api/buzzer-state");
+				updateByState(state);
+				setStatus("online");
+			} catch (err) {
+				setStatus("brak polaczenia z serwerem");
+			}
+		}
+
+		async function clickBuzzer() {
+			if (!myPlayer) {
+				return;
+			}
+			if (currentState && currentState.winner !== null) {
+				return;
+			}
+			buzzerBtn.disabled = true;
+			try {
+				const payload = {
+					player: myPlayer,
+					name: myName
+				};
+				const data = await fetchJson("/api/buzzer-click", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify(payload)
+				});
+				updateByState(data.state);
+				setStatus("online");
+			} catch (err) {
+				buzzerBtn.disabled = false;
+				setStatus("blad wyslania klikniecia");
+			}
+		}
+
+		async function resetRound() {
+			try {
+				const data = await fetchJson("/api/buzzer-reset", {
+					method: "POST"
+				});
+				updateByState(data.state);
+				setStatus("online");
+			} catch (err) {
+				setStatus("blad resetu");
+			}
+		}
+
+		function startPolling() {
+			if (pollTimer) {
+				clearInterval(pollTimer);
+			}
+			pollTimer = setInterval(refreshState, 300);
+		}
+
+		function joinGame() {
+			const playerValue = playerSelect.value;
+			const player = Number(playerValue);
+			if (player !== 1 && player !== 2 && player !== 3) {
+				return;
+			}
+			myPlayer = player;
+			myName = safeName(nickInput.value, player);
+			meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
+			persistIdentity();
+			setJoinedUi(true);
+			startPolling();
+			refreshState();
+		}
+
+		function leaveGame() {
+			myPlayer = null;
+			myName = "";
+			if (pollTimer) {
+				clearInterval(pollTimer);
+				pollTimer = null;
+			}
+			setJoinedUi(false);
+			setStatus("offline");
+		}
+
+		joinBtn.addEventListener("click", joinGame);
+		buzzerBtn.addEventListener("click", clickBuzzer);
+		resetBtn.addEventListener("click", resetRound);
+		changeBtn.addEventListener("click", leaveGame);
+
+		restoreIdentity();
+		if (nickInput.value.trim().length === 0) {
+			const player = Number(playerSelect.value);
+			nickInput.value = "Gracz " + player;
+		}
+		playerSelect.addEventListener("change", () => {
+			const player = Number(playerSelect.value);
+			const value = nickInput.value.trim();
+			if (value.length > 0) {
+				return;
+			}
+			nickInput.value = "Gracz " + player;
+		});
+
+		if (window.location.hostname.indexOf("github.io") !== -1 && API_BASE_URL.indexOf("127.0.0.1") !== -1) {
+			setStatus("ustaw poprawny API_BASE_URL do zdalnego backendu");
+		}
+	</script>
+</body>
+</html>
