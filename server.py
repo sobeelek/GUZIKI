@@ -31,28 +31,123 @@ MAX_PLAYERS = 8
 VIDEO_CONTROLLER_NAME = "sobik"
 VIDEO_CONTROLLER_PASSWORD = "lol123ASD@"
 DEEZER_POLISH_HIPHOP_QUERY = "polski hip hop"
+QUIZ_MUSIC_FIXED_POLISH = "polska_muzyka_wylacznie"
+QUIZ_MUSIC_FIXED_POLISH_LABEL = ""
+QUIZ_POLISH_ONLY_FALLBACK_TERMS = (
+	"polski rap",
+	"polski hip hop",
+	"trap polska",
+	"polski pop",
+	"2024 polska muzyka",
+	"2023 polska muzyka",
+	"rap polska",
+	"hip hop polska",
+	"drill polska",
+	"polska muzyka",
+	"lista przebojów polska",
+)
 QUIZ_HIPHOP_YEAR_RANGE_QUERY = "hiphop_years_2022_2026"
 QUIZ_HIPHOP_YEAR_QUERY_LEGACY = "hip hop [2022-2026]"
 QUIZ_HIPHOP_YEAR_MIN = 2022
 QUIZ_HIPHOP_YEAR_MAX = 2026
+# Najważniejsze: tylko polska muzyka w quizie — zakres lat (gdy Deezer podaje rok wydania).
+QUIZ_MODERN_POP_YEAR_MIN = 2012
+QUIZ_MODERN_POP_YEAR_MAX = 2026
+# Najważniejsze: podfoldowane igły — odcinają zachodnią muzykę poważną / import z PL-ISRC (np. Bartók).
+QUIZ_BLOCK_FOREIGN_CLASSICAL_NEEDLES = (
+	"bartok",
+	"bela bartok",
+	"beethoven",
+	"mozart",
+	"vivaldi",
+	"tchaikovsky",
+	"tchaikov",
+	"mussorgsky",
+	"debussy",
+	"brahms",
+	"dvorak",
+	"mahler",
+	"wagner",
+	"rachmanin",
+	"stravinsky",
+	"orchester",
+	"roumain",
+	"roumanie",
+	"populaires roumain",
+	"danses populaires",
+	"philharmonia",
+)
 DEEZER_HTTP_UA = (
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 	"(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 )
-QUIZ_POLISH_YOUTH_DEEZER_QUERIES = (
+QUIZ_POLISH_DIVERSE_DEEZER_QUERIES = (
 	"polski rap",
 	"polski hip hop",
+	"trap polska",
 	"rap polska",
 	"hip hop polska",
-	"trap polska",
-	"polski drill",
-	"polska muzyka rap",
-	"2025 polski rap",
-	"2024 polski hip hop",
-	"2023 trap polska",
-	"2022 rap polska",
+	"drill polska",
+	"polski pop",
+	"2025 polska muzyka",
+	"2024 polska muzyka",
+	"2023 polska muzyka",
+	"polski rock",
+	"piosenki po polsku",
+	"muzyka polska",
+	"polska ballada",
+	"polski folk rock",
 )
+# Najważniejsze: pula quizu — wyłącznie utwory powiązane z tą listą (Deezer search po nazwie + dopasowanie wykonawcy).
+QUIZ_POOL_WHITELIST_ARTISTS = (
+	"Fagata",
+	"Mata",
+	"Szpaku",
+	"Sobel",
+	"Quebo",
+	"Quebonafide",
+	"miu",
+	"Malik Montana",
+	"OKI",
+	"White 2115",
+	"SB Maffija",
+	"SVMIR",
+	"Sentino",
+	"Kaz Bałagane",
+	"Gibbs",
+	"Pezet",
+	"Bambi",
+	"Young Leosia",
+	"Dzarma",
+	"Margaret",
+	"Rubens Babicz",
+	"Row Babicze",
+	"Kizo",
+	"Krzysztof Krafczyk",
+	"Sanah",
+	"Dawid Podsiadło",
+	"Bedoes",
+	"Kabe",
+	"Javier",
+	"Kinny Zimmer",
+	"Fukaj",
+	"Chivas",
+)
+QUIZ_MODERN_POOL_ARTIST_SEEDS = QUIZ_POOL_WHITELIST_ARTISTS
 POLISH_SCENE_ARTIST_SEEDS = (
+	"Sanah",
+	"Dawid Podsiadło",
+	"Maanam",
+	"Lady Pank",
+	"Wilki",
+	"Myslovitz",
+	"Enej",
+	"Krzysztof Zalewski",
+	"Mrozu",
+	"Natalia Szroeder",
+	"Czesław Niemen",
+	"Perfect",
+	"Dżem",
 	"Szpaku",
 	"Sobel",
 	"OKI",
@@ -79,7 +174,26 @@ QUIZ_PHASE_POINTS = [4, 3, 2, 1]
 QUIZ_REVEAL_CLIP_SEC = 10
 QUIZ_AFTER_REVEAL_NEXT_SEC = 1.0
 QUIZ_MAX_SKIPS_PER_ROUND = 4
+QUIZ_POOL_CACHE_TTL_MS = 40 * 60 * 1000
+QUIZ_POOL_BUILD_MAX_DEEZER_HTTP = 14
+# Najważniejsze: najpierw kilka zapytań z sortem RANKING_DESC (popularne na Deezerze).
+QUIZ_POOL_POPULAR_LEADING_MAX_HTTP = 6
+# Najważniejsze: żeby jeden artysta (np. z jednego wyniku search) nie zajmował całej puli.
+QUIZ_POOL_MAX_TRACKS_PER_ARTIST = 4
+# Najważniejsze: po złożeniu puli zostaje tylko N utworów z najwyższym rank Deezera (nie „lista Billboard”, tylko przecięcie naszej puli).
+QUIZ_POOL_TOP_BY_RANK_COUNT = 30
+QUIZ_POLISH_POPULAR_LEADING_TERMS = (
+	"polski rap",
+	"polski hip hop",
+	"trap polska",
+	"polski pop",
+	"2024 polska muzyka",
+	"polski rock",
+)
+QUIZ_POOL_SCENE_MAX_ARTISTS = 10
 _DEEZER_LAST_FETCH_ERR = ""
+_QUIZ_TRACK_POOL_CACHE = None
+_QUIZ_TRACK_POOL_CACHE_MS = 0
 
 _POLISH_DIACRITICS_RE = re.compile(
 	r"[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b]"
@@ -155,7 +269,7 @@ BUZZER_STATE = {
 	"quiz_track_title": "",
 	"quiz_track_artist": "",
 	"quiz_track_id": "",
-	"quiz_music_query": DEEZER_POLISH_HIPHOP_QUERY,
+	"quiz_music_query": QUIZ_MUSIC_FIXED_POLISH,
 	"quiz_reveal_active": False,
 	"quiz_reveal_seek_middle": False,
 	"quiz_command_token": 0,
@@ -470,10 +584,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 			key = str(i)
 			if key not in hint:
 				hint[key] = False
-		mq = BUZZER_STATE.get("quiz_music_query")
-		if not isinstance(mq, str) or len(str(mq).strip()) < 2:
-			# Najważniejsze: domyślny typ muzyki przy starym stanie serwera bez tego pola.
-			BUZZER_STATE["quiz_music_query"] = DEEZER_POLISH_HIPHOP_QUERY
+		# Najważniejsze: jedna kategoria serwera — wylacznie polska muzyka (nadpisuje stare zapisy stanu).
+		BUZZER_STATE["quiz_music_query"] = QUIZ_MUSIC_FIXED_POLISH
 		if "quiz_reveal_active" not in BUZZER_STATE:
 			BUZZER_STATE["quiz_reveal_active"] = False
 		if "quiz_reveal_seek_middle" not in BUZZER_STATE:
@@ -687,13 +799,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 	def _current_quiz_music_query(self):
 		self._ensure_quiz_state()
-		q = self._sanitize_music_query(BUZZER_STATE.get("quiz_music_query", ""))
-		if q == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
-			BUZZER_STATE["quiz_music_query"] = QUIZ_HIPHOP_YEAR_RANGE_QUERY
-			q = QUIZ_HIPHOP_YEAR_RANGE_QUERY
-		if not q:
-			return DEEZER_POLISH_HIPHOP_QUERY
-		return q
+		return QUIZ_MUSIC_FIXED_POLISH
 
 	def _quiz_music_query_is_hiphop_year_range(self, q):
 		s = str(q or "").strip()
@@ -704,15 +810,16 @@ class AppHandler(SimpleHTTPRequestHandler):
 		return False
 
 	def _build_quiz_track_pool_for_query(self, query_raw):
-		# Najważniejsze: pula utworów Deezer dla dowolnego zapytania (multiplayer + quiz solo) — bez mutacji BUZZER_STATE.
-		global _DEEZER_LAST_FETCH_ERR
+		# Najważniejsze: pula z Deezera — polskie utwory; krotka budowa (malo HTTP) + cache w pamieci zeby kolejne rundy nie czekaly na Deezer.
+		global _DEEZER_LAST_FETCH_ERR, _QUIZ_TRACK_POOL_CACHE, _QUIZ_TRACK_POOL_CACHE_MS
+		now = self._now_ms()
+		if _QUIZ_TRACK_POOL_CACHE and (now - _QUIZ_TRACK_POOL_CACHE_MS) < QUIZ_POOL_CACHE_TTL_MS:
+			return list(_QUIZ_TRACK_POOL_CACHE)
 		_DEEZER_LAST_FETCH_ERR = ""
-		q = self._sanitize_music_query(query_raw)
-		if not q:
-			q = DEEZER_POLISH_HIPHOP_QUERY
-		if q == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
-			q = QUIZ_HIPHOP_YEAR_RANGE_QUERY
-		apply_year = self._quiz_music_query_is_hiphop_year_range(q)
+		if self._quiz_music_query_is_hiphop_year_range(query_raw):
+			year_filter = (QUIZ_HIPHOP_YEAR_MIN, QUIZ_HIPHOP_YEAR_MAX)
+		else:
+			year_filter = (QUIZ_MODERN_POP_YEAR_MIN, QUIZ_MODERN_POP_YEAR_MAX)
 		seen_ids = set()
 		tracks = []
 
@@ -724,47 +831,82 @@ class AppHandler(SimpleHTTPRequestHandler):
 				seen_ids.add(tid)
 				tracks.append(t)
 
-		add_batch(self._fetch_deezer_polish_scene_artist_pool(160, apply_year))
-		if len(tracks) < 25:
-			add_batch(self._fetch_deezer_polish_scene_artist_pool(200, False))
-		if len(tracks) < 30:
-			add_batch(self._fetch_deezer_polish_youth_quiz_pool(120, False))
-		if not apply_year and len(tracks) < 20:
-			add_batch(self._fetch_deezer_tracks(q, 100))
+		add_batch(
+			self._fetch_deezer_quiz_whitelist_artist_pool(
+				200,
+				year_filter,
+				max_artists=int(QUIZ_POOL_BUILD_MAX_DEEZER_HTTP),
+			)
+		)
 		if not tracks:
-			for term in ("Szpaku", "Sobel", "OKI", "polski rap", "polski hip hop", "rap"):
-				add_batch(self._fetch_deezer_tracks(term, 100))
-				if len(tracks) >= 15:
-					break
-		if not tracks:
-			add_batch(self._fetch_deezer_chart_tracks(50))
+			add_batch(
+				self._fetch_deezer_chart_tracks(
+					100,
+					year_filter=year_filter,
+					quiz_pool_whitelist=True,
+				)
+			)
+		if tracks:
+			# Najważniejsze: ucinamy dominację jednego artysty z jednego zapytania Deezera.
+			tracks = self._quiz_pool_limit_per_artist(tracks, int(QUIZ_POOL_MAX_TRACKS_PER_ARTIST))
+			# Najważniejsze: sort po rank Deezera — tylko top N do cache (losowanie dalej z tej listy).
+			tracks.sort(key=lambda t: int(t.get("rank") or 0), reverse=True)
+			topn = max(1, int(QUIZ_POOL_TOP_BY_RANK_COUNT))
+			tracks = tracks[:topn]
+			_QUIZ_TRACK_POOL_CACHE = tracks
+			_QUIZ_TRACK_POOL_CACHE_MS = self._now_ms()
 		return tracks
 
+	def _quiz_pool_limit_per_artist(self, tracks, max_per_artist):
+		# Najważniejsze: po złożeniu puli — max N pozycji na znormalizowanego artystę (losowa kolejność przed ucinaniem).
+		if not tracks or max_per_artist <= 0:
+			return tracks
+		shuffled = list(tracks)
+		random.shuffle(shuffled)
+		counts = {}
+		out = []
+		for t in shuffled:
+			a = _fold_text_answer(str(t.get("artist") or "")).strip() or "_"
+			n = counts.get(a, 0)
+			if n >= max_per_artist:
+				continue
+			counts[a] = n + 1
+			out.append(t)
+		return out
+
+	def _weighted_quiz_track_choice(self, tracks):
+		# Najważniejsze: mocna losowość (mix gatunków) + częściowo rank; sam rank faworyzował jedną scenę.
+		if not tracks:
+			return None
+		if random.random() < 0.62:
+			return random.choice(tracks)
+		ws = []
+		for t in tracks:
+			r = max(1, int(t.get("rank") or 0))
+			ws.append(float(r) ** 0.45)
+		return random.choices(tracks, weights=ws, k=1)[0]
+
 	def _pick_random_quiz_track(self):
-		# Najważniejsze: losowy utwór z puli wyników Deezer dla zapytania ustawionego przez sobika (quiz_music_query — bez zmian miedzy rundami, np. rap 2022-2026).
+		# Najważniejsze: utwór z polskiej puli — losowość + lekki bias rank (żeby nie jedna scena).
 		tracks = self._build_quiz_track_pool_for_query(self._current_quiz_music_query())
 		if not tracks:
 			return None
-		random.shuffle(tracks)
 		last_id = str(BUZZER_STATE.get("quiz_track_id", "")).strip()
-		for track in tracks:
-			track_id = str(track.get("id", "")).strip()
-			if track_id and track_id != last_id:
-				return track
-		return tracks[0]
+		cands = [t for t in tracks if str(t.get("id", "")).strip() != last_id]
+		if not cands:
+			cands = tracks
+		return self._weighted_quiz_track_choice(cands)
 
 	def _pick_random_quiz_track_excluding(self, query_raw, exclude_id):
 		# Najważniejsze: losowanie dla quizu solo — inny utwor niz poprzedni w sesji.
 		tracks = self._build_quiz_track_pool_for_query(query_raw)
 		if not tracks:
 			return None
-		random.shuffle(tracks)
 		ex = str(exclude_id or "").strip()
-		for track in tracks:
-			tid = str(track.get("id", "")).strip()
-			if tid and tid != ex:
-				return track
-		return tracks[0]
+		cands = [t for t in tracks if str(t.get("id", "")).strip() != ex]
+		if not cands:
+			cands = tracks
+		return self._weighted_quiz_track_choice(cands)
 
 	def _quiz_round_limit_reached(self):
 		# Najważniejsze: sesja quizu z limitem — nie startuj kolejnego utworu gdy wykorzystano pulę rund.
@@ -941,7 +1083,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizTrackTitle": qt,
 			"quizTrackArtist": qa,
 			"quizTrackId": BUZZER_STATE["quiz_track_id"],
-			"quizMusicQuery": self._current_quiz_music_query(),
+			"quizMusicQuery": QUIZ_MUSIC_FIXED_POLISH_LABEL,
 			"quizRevealActive": bool(BUZZER_STATE.get("quiz_reveal_active")),
 			"quizRevealSeekMiddle": bool(BUZZER_STATE.get("quiz_reveal_seek_middle")),
 			"quizCommandToken": BUZZER_STATE["quiz_command_token"],
@@ -1081,9 +1223,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _solo_new_game(self, music_query_raw):
 		with SOLO_QUIZ_LOCK:
 			self._prune_solo_sessions_unlocked()
-			q = self._sanitize_music_query(music_query_raw) or DEEZER_POLISH_HIPHOP_QUERY
-			if q == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
-				q = QUIZ_HIPHOP_YEAR_RANGE_QUERY
+			_ = music_query_raw
+			q = QUIZ_MUSIC_FIXED_POLISH_LABEL
 			tok = secrets.token_hex(20)
 			sess = {
 				"token": tok,
@@ -1924,18 +2065,66 @@ class AppHandler(SimpleHTTPRequestHandler):
 				pass
 		return out[:lim]
 
-	def _fetch_deezer_polish_scene_artist_pool(self, cap, apply_year_window):
-		# Najważniejsze: na czasie PL scena — top utworów artystów (Szpaku, Sobel, OKI itd.) + fallback search/track.
+	def _deezer_raw_item_year_ok_quiz(self, item, year_filter):
+		# Najważniejsze: okno lat dla quizu; brak roku w API — nie odrzucamy (żeby pula nie pustnia).
+		if not year_filter:
+			return True
+		try:
+			ymin, ymax = int(year_filter[0]), int(year_filter[1])
+		except Exception:
+			return True
+		y = self._deezer_track_release_year(item)
+		if y is None:
+			return True
+		return ymin <= y <= ymax
+
+	def _deezer_quiz_whitelist_artist_blob(self, item):
+		# Najważniejsze: wykonawca główny + contributors (featy) — żeby whitelist łapał kolaże.
+		parts = []
+		am = item.get("artist") or {}
+		parts.append(str(am.get("name") or ""))
+		for c in item.get("contributors") or []:
+			if isinstance(c, dict):
+				parts.append(str(c.get("name") or ""))
+		return _fold_text_answer(" ".join(parts))
+
+	def _deezer_raw_item_quiz_whitelist_artist_ok(self, item):
+		# Najważniejsze: dopasowanie po znormalizowanej nazwie z QUIZ_POOL_WHITELIST_ARTISTS (krótkie nicki jak tokeny).
+		blob = self._deezer_quiz_whitelist_artist_blob(item)
+		if not blob.strip():
+			return False
+		tokens = set(re.split(r"[^a-z0-9]+", blob))
+		tokens.discard("")
+		for seed in QUIZ_POOL_WHITELIST_ARTISTS:
+			fs = _fold_text_answer(seed).strip()
+			if len(fs) < 2:
+				continue
+			if len(fs) <= 4:
+				if fs in tokens:
+					return True
+			else:
+				if fs in blob:
+					return True
+		return False
+
+	def _fetch_deezer_quiz_whitelist_artist_pool(self, cap, year_filter, max_artists=None):
+		# Najważniejsze: tylko utwory z whitelisty — osobne zapytania Deezer po każdym artyście (rotacja nazw).
 		out = []
 		seen = set()
-		for name in POLISH_SCENE_ARTIST_SEEDS:
+		names = list(QUIZ_POOL_WHITELIST_ARTISTS)
+		random.shuffle(names)
+		ma = int(QUIZ_POOL_BUILD_MAX_DEEZER_HTTP) if max_artists is None else int(max_artists)
+		ma = max(4, min(ma, len(names)))
+		for name in names[:ma]:
 			if len(out) >= cap:
 				break
-			for item in self._deezer_raw_items_artist_top_or_track(name, 40):
-				if apply_year_window:
-					y = self._deezer_track_release_year(item)
-					if y is not None and (y < QUIZ_HIPHOP_YEAR_MIN or y > QUIZ_HIPHOP_YEAR_MAX):
-						continue
+			for item in self._deezer_raw_items_artist_top_or_track(name, 45):
+				if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+					continue
+				if self._deezer_raw_item_quiz_block_foreign_classical(item):
+					continue
+				if not self._deezer_raw_item_quiz_whitelist_artist_ok(item):
+					continue
 				rec = self._deezer_track_to_suggest_dict(item)
 				if not rec:
 					continue
@@ -1946,30 +2135,94 @@ class AppHandler(SimpleHTTPRequestHandler):
 				out.append(rec)
 		return out
 
-	def _fetch_deezer_polish_youth_quiz_pool(self, cap, apply_year_window):
-		# Najważniejsze: polski rap / hip-hop (młodzieżowa scena w wynikach Deezer), /search + /search/track.
+	def _fetch_deezer_polish_scene_artist_pool(self, cap, year_filter, max_artists=None):
+		# Najważniejsze: PL scena — losowa podzbior artystow (szybciej niz cala lista przy kazdym losowaniu).
+		out = []
+		seen = set()
+		names = list(QUIZ_MODERN_POOL_ARTIST_SEEDS)
+		random.shuffle(names)
+		if max_artists is not None:
+			names = names[: max(1, int(max_artists))]
+		for name in names:
+			if len(out) >= cap:
+				break
+			for item in self._deezer_raw_items_artist_top_or_track(name, 40):
+				if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+					continue
+				if self._deezer_raw_item_quiz_block_foreign_classical(item):
+					continue
+				if not self._deezer_raw_item_quiz_whitelist_artist_ok(item):
+					continue
+				rec = self._deezer_track_to_suggest_dict(item)
+				if not rec:
+					continue
+				tid = str(rec.get("id") or "").strip()
+				if not tid or tid in seen:
+					continue
+				seen.add(tid)
+				out.append(rec)
+		return out
+
+	def _fetch_deezer_polish_popular_leading_pool(self, cap, year_filter, max_fetches=6):
+		# Najważniejsze: zapytania pod „hity” + order=RANKING_DESC — wyniki bliżej przebojów niż losowa kolejność wyszukiwania.
+		out = []
+		seen = set()
+		fetches = 0
+		mf = max(1, min(int(max_fetches), 20))
+		terms = list(QUIZ_POLISH_POPULAR_LEADING_TERMS)
+		random.shuffle(terms)
+		for term in terms:
+			if len(out) >= cap or fetches >= mf:
+				return out
+			fetches = fetches + 1
+			url = "https://api.deezer.com/search/track?" + urlencode(
+				{"q": term, "limit": 50, "index": 0, "order": "RANKING_DESC"}
+			)
+			try:
+				parsed = self._fetch_deezer_url_json(url)
+			except Exception:
+				continue
+			for item in parsed.get("data") or []:
+				if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+					continue
+				if not self._deezer_raw_item_accept_polish_quiz_pool(item):
+					continue
+				rec = self._deezer_track_to_suggest_dict(item)
+				if not rec:
+					continue
+				tid = str(rec.get("id") or "").strip()
+				if not tid or tid in seen:
+					continue
+				seen.add(tid)
+				out.append(rec)
+		return out
+
+	def _fetch_deezer_polish_diverse_quiz_pool(self, cap, year_filter, max_fetches=18, search_indices=None):
+		# Najważniejsze: rozne gatunki — kilka zapytan Deezer (limit HTTP, jedna strona wynikow na zapytanie).
 		out = []
 		seen = set()
 		bases = ("https://api.deezer.com/search?", "https://api.deezer.com/search/track?")
-		indices = (0, 35, 70)
+		indices = search_indices if search_indices is not None else (0,)
 		fetches = 0
-		max_fetches = 60
-		for term in QUIZ_POLISH_YOUTH_DEEZER_QUERIES:
+		mf = max(6, min(int(max_fetches), 40))
+		terms = list(QUIZ_POLISH_DIVERSE_DEEZER_QUERIES)
+		random.shuffle(terms)
+		for term in terms:
 			for index in indices:
 				for base in bases:
-					if len(out) >= cap or fetches >= max_fetches:
+					if len(out) >= cap or fetches >= mf:
 						return out
 					fetches = fetches + 1
-					url = base + urlencode({"q": term, "limit": 50, "index": index})
+					url = base + urlencode({"q": term, "limit": 50, "index": index, "order": "RANKING_DESC"})
 					try:
 						parsed = self._fetch_deezer_url_json(url)
 					except Exception:
 						continue
 					for item in parsed.get("data") or []:
-						if apply_year_window:
-							y = self._deezer_track_release_year(item)
-							if y is not None and (y < QUIZ_HIPHOP_YEAR_MIN or y > QUIZ_HIPHOP_YEAR_MAX):
-								continue
+						if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+							continue
+						if not self._deezer_raw_item_accept_polish_quiz_pool(item):
+							continue
 						rec = self._deezer_track_to_suggest_dict(item)
 						if not rec:
 							continue
@@ -1989,12 +2242,17 @@ class AppHandler(SimpleHTTPRequestHandler):
 		label = title
 		if artist_name:
 			label = title + " - " + artist_name
+		try:
+			rank_val = int(item.get("rank"))
+		except Exception:
+			rank_val = 0
 		return {
 			"id": str(item.get("id") or ""),
 			"label": label[:120],
 			"previewUrl": preview,
 			"title": title[:80],
 			"artist": artist_name[:80],
+			"rank": rank_val,
 		}
 
 	def _deezer_track_involves_artist_id(self, item, artist_id):
@@ -2053,6 +2311,61 @@ class AppHandler(SimpleHTTPRequestHandler):
 		for hint in SEARCH_POLISH_NAME_HINTS:
 			fh = _fold_text_answer(hint)
 			if len(fh) >= 5 and (fh in an or fh in ti or fh in comb):
+				return True
+		return False
+
+	def _deezer_raw_item_quiz_block_foreign_classical(self, item):
+		# Najważniejsze: wytnij zachodnią klasykę / „Danses roumaines” itp. (fałszywe trafienia z kompilacji PL).
+		blob = _fold_text_answer(
+			(str(item.get("title") or "")
+			 + " "
+			 + str((item.get("artist") or {}).get("name") or "")
+			 + " "
+			 + str((item.get("album") or {}).get("title") or ""))
+		).lower()
+		for needle in QUIZ_BLOCK_FOREIGN_CLASSICAL_NEEDLES:
+			fn = _fold_text_answer(needle).lower()
+			if len(fn) >= 4 and fn in blob:
+				return True
+		try:
+			gid = int(item.get("genre_id") or 0)
+		except Exception:
+			gid = 0
+		if gid == 132:
+			return True
+		return False
+
+	def _deezer_raw_item_accept_polish_quiz_pool(self, item):
+		# Najważniejsze: twardsza reguła niż wyszukiwarka — bez „polskości” tylko z pola album (importy z PL ISRC).
+		if self._deezer_raw_item_quiz_block_foreign_classical(item):
+			return False
+		try:
+			isrc = str(item.get("isrc") or "").strip().upper()
+		except Exception:
+			isrc = ""
+		title = str(item.get("title") or "")
+		artist_name = str((item.get("artist") or {}).get("name") or "")
+		an = _fold_text_answer(artist_name)
+		ti = _fold_text_answer(title)
+		if _POLISH_DIACRITICS_RE.search(title + artist_name):
+			return True
+		if isrc.startswith("PL"):
+			for seed in POLISH_SCENE_ARTIST_SEEDS:
+				fs = _fold_text_answer(seed)
+				if len(fs) >= 3 and fs in an:
+					return True
+			for hint in SEARCH_POLISH_NAME_HINTS:
+				fh = _fold_text_answer(hint)
+				if len(fh) >= 5 and (fh in an or fh in ti):
+					return True
+			return False
+		for seed in POLISH_SCENE_ARTIST_SEEDS:
+			fs = _fold_text_answer(seed)
+			if len(fs) >= 3 and fs in an:
+				return True
+		for hint in SEARCH_POLISH_NAME_HINTS:
+			fh = _fold_text_answer(hint)
+			if len(fh) >= 5 and (fh in an or fh in ti):
 				return True
 		return False
 
@@ -2152,17 +2465,28 @@ class AppHandler(SimpleHTTPRequestHandler):
 			pass
 		return out[:limit]
 
-	def _fetch_deezer_tracks(self, term, limit):
+	def _fetch_deezer_tracks(self, term, limit, polish_only=False, order="RANKING_DESC", year_filter=None, quiz_pool_polish=False):
 		out = []
 		seen = set()
 		lim = min(50, max(10, int(limit)))
+		params = {"q": term, "limit": lim}
+		if order:
+			params["order"] = order
 		for base in ("https://api.deezer.com/search?", "https://api.deezer.com/search/track?"):
-			url = base + urlencode({"q": term, "limit": lim})
+			url = base + urlencode(params)
 			try:
 				parsed = self._fetch_deezer_url_json(url)
 			except Exception:
 				continue
 			for item in parsed.get("data") or []:
+				if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+					continue
+				if polish_only:
+					if quiz_pool_polish:
+						if not self._deezer_raw_item_accept_polish_quiz_pool(item):
+							continue
+					elif not self._deezer_raw_item_likely_polish(item):
+						continue
 				rec = self._deezer_track_to_suggest_dict(item)
 				if not rec:
 					continue
@@ -2175,13 +2499,26 @@ class AppHandler(SimpleHTTPRequestHandler):
 					return out
 		return out
 
-	def _fetch_deezer_chart_tracks(self, limit):
+	def _fetch_deezer_chart_tracks(self, limit, polish_only=False, year_filter=None, quiz_pool_polish=False, quiz_pool_whitelist=False):
 		# Najważniejsze: gdy search/pl scena nie zwraca nic (SSL/siec/region), chart 0 zwykle nadal ma preview.
 		out = []
 		seen = set()
-		lim = min(50, max(5, int(limit)))
+		lim = min(100, max(5, int(limit)))
 		parsed = self._fetch_deezer_url_json("https://api.deezer.com/chart/0/tracks?limit=%d" % lim)
 		for item in parsed.get("data") or []:
+			if not self._deezer_raw_item_year_ok_quiz(item, year_filter):
+				continue
+			if quiz_pool_whitelist:
+				if self._deezer_raw_item_quiz_block_foreign_classical(item):
+					continue
+				if not self._deezer_raw_item_quiz_whitelist_artist_ok(item):
+					continue
+			elif polish_only:
+				if quiz_pool_polish:
+					if not self._deezer_raw_item_accept_polish_quiz_pool(item):
+						continue
+				elif not self._deezer_raw_item_likely_polish(item):
+					continue
 			rec = self._deezer_track_to_suggest_dict(item)
 			if not rec:
 				continue
@@ -2274,7 +2611,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def handle_deezer_polish_hiphop_get(self, query_text):
 		try:
 			limit = self._get_limit_from_query(query_text, 30)
-			tracks = self._fetch_deezer_tracks(DEEZER_POLISH_HIPHOP_QUERY, max(limit * 2, 30))
+			tracks = self._fetch_deezer_tracks(DEEZER_POLISH_HIPHOP_QUERY, max(limit * 2, 30), polish_only=True)
 			random.shuffle(tracks)
 			self.json_response({"tracks": tracks[:limit]}, 200)
 		except Exception as ex:
@@ -2294,16 +2631,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not self._is_video_controller(name):
 				self.json_response({"error": "Only sobik can set quiz music type"}, 403)
 				return
-			query = self._sanitize_music_query(parsed.get("query"))
-			if not query:
-				self.json_response({"error": "Invalid query (2-120 chars)"}, 400)
-				return
-			if query == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
-				query = QUIZ_HIPHOP_YEAR_RANGE_QUERY
-			BUZZER_STATE["quiz_music_query"] = query
-			BUZZER_STATE["last_update_ms"] = self._now_ms()
-			self._maybe_auto_start_quiz_when_all_ready()
-			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+			self.json_response({"error": "Ustawianie typu muzyki jest wylaczone."}, 403)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 

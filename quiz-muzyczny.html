@@ -625,6 +625,7 @@
 			display: flex;
 			justify-content: center;
 		}
+
 	</style>
 </head>
 <body>
@@ -634,14 +635,6 @@
 			<p class="me" id="meInfo"></p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
 
-			<div id="adminMusicSetup" class="section hidden">
-				<label for="musicPreset">Typ</label>
-				<select id="musicPreset"></select>
-				<div id="customMusicWrap" class="hidden">
-					<input id="customMusicInput" type="text" placeholder="Zapytanie" />
-				</div>
-				<button id="saveMusicTypeBtn" class="main">Zapisz typ</button>
-			</div>
 			<div id="adminRoundLimitRow" class="section hidden">
 				<label for="quizRoundLimitInput">Limit utworów w sesji (0 = bez limitu)</label>
 				<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:6px;">
@@ -718,12 +711,7 @@
 		const AUTO_PHASE_DELAY_MS = 700;
 		const meInfo = document.getElementById("meInfo");
 		const revealPanel = document.getElementById("revealPanel");
-		const adminMusicSetup = document.getElementById("adminMusicSetup");
 		const adminRoundControls = document.getElementById("adminRoundControls");
-		const musicPreset = document.getElementById("musicPreset");
-		const customMusicWrap = document.getElementById("customMusicWrap");
-		const customMusicInput = document.getElementById("customMusicInput");
-		const saveMusicTypeBtn = document.getElementById("saveMusicTypeBtn");
 		const adminRoundLimitRow = document.getElementById("adminRoundLimitRow");
 		const quizRoundLimitInput = document.getElementById("quizRoundLimitInput");
 		const saveRoundLimitBtn = document.getElementById("saveRoundLimitBtn");
@@ -780,23 +768,8 @@
 		let currentQuizGuessHistory = {};
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
-		let musicPresetDirty = false;
 		let guessSubmitInFlight = false;
 		let quizEndOverlayDismissed = false;
-
-		const MUSIC_PRESETS = [
-			{ value: "hiphop_years_2022_2026", label: "Polski rap / hip-hop (2022-2026)" },
-			{ value: "polski hip hop", label: "Polski hip hop" },
-			{ value: "polska muzyka", label: "Polska muzyka" },
-			{ value: "rock", label: "Rock" },
-			{ value: "pop", label: "Pop" },
-			{ value: "metal", label: "Metal" },
-			{ value: "jazz", label: "Jazz" },
-			{ value: "electronic dance", label: "Electronic / dance" },
-			{ value: "hip hop", label: "Hip hop (ogolnie)" },
-			{ value: "classical", label: "Muzyka klasyczna" },
-			{ value: "__custom__", label: "Wlasne zapytanie" }
-		];
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
 		function isValidPlayer(player) { return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS; }
@@ -842,52 +815,9 @@
 		function getVolumeStorageKey() { return getStorageKey("quiz_volume"); }
 
 		function updateAdminUi() {
-			adminMusicSetup.classList.toggle("hidden", !isAdmin());
 			adminRoundLimitRow.classList.toggle("hidden", !isAdmin());
 			adminRoundControls.classList.toggle("hidden", !isAdmin());
 			autoToggleBtn.textContent = autoAdvanceEnabled ? "Auto: ON" : "Auto: OFF";
-		}
-
-		function buildMusicPresetSelect() {
-			const opts = MUSIC_PRESETS.map((p) => {
-				return '<option value="' + String(p.value).replace(/"/g, "&quot;") + '">' + p.label + "</option>";
-			});
-			musicPreset.innerHTML = opts.join("");
-		}
-
-		function canonicalMusicQueryKey(q) {
-			const s = String(q || "").trim();
-			if (s === "hip hop [2022-2026]" || s === "hiphop_2022_2026") {
-				return "hiphop_years_2022_2026";
-			}
-			return s;
-		}
-
-		function syncMusicControlsFromQuery(queryText) {
-			const q = canonicalMusicQueryKey(String(queryText || "").trim());
-			let matched = false;
-			for (let i = 0; i < MUSIC_PRESETS.length; i = i + 1) {
-				const p = MUSIC_PRESETS[i];
-				if (p.value !== "__custom__" && p.value === q) {
-					musicPreset.value = p.value;
-					matched = true;
-					break;
-				}
-			}
-			if (matched) {
-				customMusicWrap.classList.add("hidden");
-				return;
-			}
-			musicPreset.value = "__custom__";
-			customMusicInput.value = q;
-			customMusicWrap.classList.remove("hidden");
-		}
-
-		function readMusicQueryFromUi() {
-			if (musicPreset.value === "__custom__") {
-				return String(customMusicInput.value || "").trim();
-			}
-			return String(musicPreset.value || "").trim();
 		}
 
 		async function saveRoundLimit() {
@@ -913,30 +843,6 @@
 				setStatus("OK — limit zapisany, licznik sesji wyzerowany");
 			} catch (err) {
 				const msg = err && err.message ? String(err.message) : "blad zapisu limitu";
-				setStatus(msg);
-			}
-		}
-
-		async function saveMusicType() {
-			if (!isAdmin()) {
-				return;
-			}
-			const query = readMusicQueryFromUi();
-			if (!query) {
-				setStatus("brak typu");
-				return;
-			}
-			try {
-				const data = await fetchJson("/api/quiz-music-type", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ name: myName, query: query })
-				});
-				musicPresetDirty = false;
-				updateByState(data.state);
-				setStatus("OK");
-			} catch (err) {
-				const msg = err && err.message ? String(err.message) : "blad zapisu typu";
 				setStatus(msg);
 			}
 		}
@@ -1577,10 +1483,6 @@
 			currentQuizGuessHistory = state.quizGuessHistory || {};
 			const revealOn = Boolean(state.quizRevealActive);
 			const revealChorusMode = revealOn && Boolean(state.quizRevealSeekMiddle);
-			const mq = String(state.quizMusicQuery || "").trim();
-			if (isAdmin() && !musicPresetDirty) {
-				syncMusicControlsFromQuery(mq);
-			}
 			if (isAdmin() && document.activeElement !== quizRoundLimitInput) {
 				const limSync = Number(state.quizRoundLimit || 0);
 				if (Number.isFinite(limSync)) {
@@ -1829,25 +1731,12 @@
 				myName = safeName(storedName, storedPlayer);
 				meInfo.textContent = "Jestes: " + myName + " (gracz " + myPlayer + ")";
 				loadVolume();
-				buildMusicPresetSelect();
 				updateAdminUi();
 				startPolling();
 				refreshState();
 			}
 		}
 
-		musicPreset.addEventListener("change", () => {
-			musicPresetDirty = true;
-			if (musicPreset.value === "__custom__") {
-				customMusicWrap.classList.remove("hidden");
-			} else {
-				customMusicWrap.classList.add("hidden");
-			}
-		});
-		customMusicInput.addEventListener("input", () => {
-			musicPresetDirty = true;
-		});
-		saveMusicTypeBtn.addEventListener("click", saveMusicType);
 		saveRoundLimitBtn.addEventListener("click", saveRoundLimit);
 		startRoundBtn.addEventListener("click", startQuizRound);
 		nextPhaseBtn.addEventListener("click", requestNextPhase);

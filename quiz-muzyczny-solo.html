@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<link rel="icon" href="data:," />
+	<title>Quiz muzyczny — solo</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: Arial, sans-serif;
+		}
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: #111827;
+			color: #f9fafb;
+		}
+		.app-layout {
+			width: min(1640px, 98vw);
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 320px;
+			gap: 24px;
+			align-items: start;
+		}
+		.panel,
+		.lb-panel {
+			padding: 22px;
+			border-radius: 16px;
+			background: #1f2937;
+			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+		}
+		.lb-panel {
+			position: sticky;
+			top: 12px;
+		}
+		h1 { margin: 0 0 6px; font-size: 26px; }
+		.sub { margin: 0 0 14px; color: #9ca3af; font-size: 14px; }
+		.section {
+			background: #111827;
+			border: 1px solid #374151;
+			border-radius: 12px;
+			padding: 10px;
+			display: grid;
+			gap: 8px;
+			margin-bottom: 10px;
+		}
+		input[type="text"], input[type="range"], select {
+			border: 1px solid #374151;
+			border-radius: 10px;
+			background: #0b1220;
+			color: #f9fafb;
+			padding: 10px 12px;
+			font-size: 15px;
+		}
+		button {
+			border: 0;
+			border-radius: 12px;
+			padding: 12px 14px;
+			font-size: 15px;
+			font-weight: 700;
+			background: #374151;
+			color: #fff;
+			cursor: pointer;
+		}
+		button.main { background: #2563eb; }
+		button.good { background: #059669; }
+		button[disabled] { opacity: 0.5; cursor: not-allowed; }
+		.phase-actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+		.result { min-height: 28px; font-size: 20px; font-weight: 700; margin: 0; }
+		.hidden { display: none; }
+		.guess-autocomplete-wrap {
+			position: relative;
+			width: 100%;
+			margin-top: 4px;
+		}
+		.guess-suggest {
+			list-style: none;
+			margin: 0;
+			padding: 4px 0;
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: 100%;
+			z-index: 20;
+			max-height: 220px;
+			overflow: auto;
+			background: #0b1220;
+			border: 1px solid #4b5563;
+			border-radius: 10px;
+			box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+		}
+		.guess-suggest li {
+			margin: 0;
+			padding: 0;
+		}
+		.guess-suggest-item {
+			width: 100%;
+			border: 0;
+			border-radius: 0;
+			background: transparent;
+			text-align: left;
+			padding: 10px 12px;
+			font-size: 14px;
+			color: #e5e7eb;
+			cursor: pointer;
+			font-weight: 600;
+		}
+		.guess-suggest-item:hover {
+			background: #1f2937;
+		}
+		.guess-row--with-skip {
+			display: grid;
+			grid-template-columns: 1fr auto;
+			gap: 10px;
+			align-items: stretch;
+		}
+		.guess-row--with-skip input {
+			width: 100%;
+			box-sizing: border-box;
+		}
+		.skip-phase-btn {
+			min-width: 76px;
+			padding: 10px 14px;
+			font-weight: 700;
+			border-radius: 10px;
+			border: 1px solid #4b5563;
+			background: #1f2937;
+			color: #e5e7eb;
+			cursor: pointer;
+		}
+		.skip-phase-btn:disabled {
+			opacity: 0.45;
+			cursor: not-allowed;
+		}
+		.guess-form {
+			margin: 0;
+		}
+		.guess-input-main {
+			font-size: 18px !important;
+			font-weight: 600;
+			padding: 16px 18px !important;
+			min-height: 52px;
+			border: 2px solid #3b82f6 !important;
+			background: #020617 !important;
+			box-shadow: 0 4px 20px rgba(37, 99, 235, 0.2);
+		}
+		.guess-input-main:focus {
+			outline: none;
+			border-color: #60a5fa !important;
+			box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.35), 0 8px 28px rgba(37, 99, 235, 0.35);
+		}
+		.guess-input-main:disabled {
+			opacity: 0.55;
+			border-color: #475569 !important;
+			box-shadow: none;
+		}
+		.quiz-phase-badge {
+			margin: 8px 0 6px;
+			font-size: 14px;
+			font-weight: 600;
+			color: #93c5fd;
+		}
+		.quiz-progress-wrap {
+			margin-top: 6px;
+			display: grid;
+			gap: 6px;
+		}
+		.quiz-progress-label {
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			color: #64748b;
+		}
+		.quiz-progress-wrap--playing .quiz-progress-label {
+			color: #7dd3fc;
+		}
+		.quiz-progress-track {
+			height: 14px;
+			border-radius: 999px;
+			background: #020617;
+			border: 1px solid #334155;
+			overflow: hidden;
+			transition: border-color 0.2s, box-shadow 0.2s;
+		}
+		.quiz-progress-wrap--playing .quiz-progress-track {
+			height: 20px;
+			border: 2px solid #38bdf8;
+			box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35), 0 4px 24px rgba(37, 99, 235, 0.35);
+		}
+		.quiz-progress-fill {
+			height: 100%;
+			width: 0%;
+			border-radius: 999px;
+			background: linear-gradient(90deg, #1d4ed8, #38bdf8, #7dd3fc);
+			box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+		}
+		.quiz-progress-wrap--playing .quiz-progress-fill {
+			box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 16px rgba(56, 189, 248, 0.45);
+		}
+		.quiz-progress-fill.reveal {
+			background: linear-gradient(90deg, #047857, #34d399, #6ee7b7);
+		}
+		.quiz-progress-wrap--playing .quiz-progress-fill.reveal {
+			box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 14px rgba(52, 211, 153, 0.4);
+		}
+		.reveal-panel {
+			border: 2px solid #22c55e;
+			border-radius: 12px;
+			padding: 14px;
+			background: #052e16;
+			font-size: 18px;
+			font-weight: 700;
+			text-align: center;
+			color: #ecfdf5;
+		}
+		.reveal-panel .reveal-title-line {
+			font-size: 24px;
+			font-weight: 800;
+			line-height: 1.25;
+			color: #ecfdf5;
+			word-break: break-word;
+		}
+		.reveal-panel .reveal-artist-line {
+			margin-top: 8px;
+			font-size: 17px;
+			font-weight: 600;
+			color: #bbf7d0;
+		}
+		.reveal-chorus .reveal-title-line {
+			text-shadow: 2px 0 #f87171, -2px 0 #22d3ee;
+		}
+		.guess-history-panel {
+			margin: 10px 0 0;
+			padding: 10px 12px;
+			border-radius: 12px;
+			border: 1px solid #4b5563;
+			background: #0f172a;
+			font-size: 14px;
+		}
+		.guess-history-panel--below-actions {
+			margin-top: 14px;
+		}
+		.guess-history-panel ol { margin: 0; padding-left: 1.35em; }
+		.guess-hist-item {
+			list-style-position: outside;
+			padding: 10px 10px 10px 12px;
+			border-left: 4px solid #4b5563;
+			border-radius: 10px;
+			margin: 8px 0;
+		}
+		.guess-hist-line {
+			margin: 2px 0;
+			font-size: 14px;
+		}
+		.guess-hist-plain {
+			font-size: 14px;
+		}
+		.guess-hist-item--artist_hint { border-left-color: #eab308; background: rgba(234, 179, 8, 0.12); }
+		.guess-hist-item--wrong { border-left-color: #dc2626; background: rgba(220, 38, 38, 0.12); }
+		.guess-hist-item--correct { border-left-color: #22c55e; background: rgba(34, 197, 94, 0.14); }
+		.guess-hist-item--skip { border-left-color: #64748b; background: rgba(100, 116, 139, 0.18); }
+		.guess-hist-lbl { display: inline-block; min-width: 4.5em; color: #9ca3af; font-size: 12px; font-weight: 600; }
+		.lb-title { margin: 0 0 10px; font-size: 17px; }
+		.lb-list { margin: 0; padding: 0; list-style: none; font-size: 14px; }
+		.lb-row {
+			display: grid;
+			grid-template-columns: 28px 1fr auto;
+			gap: 8px;
+			align-items: center;
+			padding: 8px 6px;
+			border-bottom: 1px solid #374151;
+		}
+		.lb-rank { color: #fbbf24; font-weight: 800; }
+		.lb-muted { color: #94a3b8; font-size: 12px; margin-top: 8px; }
+		.nav-top { margin-bottom: 10px; }
+		.nav-top a { color: #93c5fd; }
+		@media (max-width: 960px) {
+			.app-layout {
+				grid-template-columns: 1fr;
+			}
+			.lb-panel {
+				position: static;
+			}
+			.phase-actions {
+				grid-template-columns: 1fr;
+			}
+		}
+	</style>
+</head>
+<body>
+	<div class="app-layout">
+		<div class="panel">
+			<div class="nav-top"><a href="wybor-trybu.html">← Wybor trybu</a></div>
+			<h1>Quiz muzyczny — solo</h1>
+			<p class="sub">Zgaduj samodzielnie. Wynik mozesz zapisac w rankingu (powiazanie z adresem IP).</p>
+
+			<div class="section">
+				<div class="phase-actions">
+					<button type="button" id="startGameBtn" class="main">Nowa gra (losuj utwor)</button>
+					<button type="button" id="nextTrackBtn" class="good" disabled>Nastepny utwor</button>
+				</div>
+			</div>
+
+			<div id="revealPanel" class="reveal-panel hidden"></div>
+
+			<div class="section">
+				<div id="quizProgressWrap" class="quiz-progress-wrap">
+					<span class="quiz-progress-label">Postep klipu</span>
+					<div class="quiz-progress-track" aria-hidden="true">
+						<div id="quizProgressFill" class="quiz-progress-fill"></div>
+					</div>
+				</div>
+				<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;">
+					<span>Glosnosc</span>
+					<input id="volumeRange" type="range" min="0" max="100" step="1" value="25" />
+					<span id="volumeLabel">25%</span>
+				</div>
+			</div>
+
+			<p id="quizPhaseBadge" class="quiz-phase-badge hidden" aria-live="polite"></p>
+			<div class="guess-autocomplete-wrap">
+				<form id="guessForm" class="guess-form" action="#" method="post">
+					<div class="guess-row guess-row--with-skip">
+						<input id="guessInput" class="guess-input-main" name="guess" type="text" placeholder="Artysta - tytul (Enter)" autocomplete="off" disabled />
+						<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>SKIP</button>
+					</div>
+				</form>
+				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
+			</div>
+			<p id="result" class="result"></p>
+			<div id="guessHistoryPanel" class="guess-history-panel guess-history-panel--below-actions hidden" aria-live="polite"></div>
+			<p id="statusEl" class="sub">Status: offline</p>
+		</div>
+
+		<aside class="lb-panel">
+			<h2 class="lb-title">Ranking (solo)</h2>
+			<p style="margin:0 0 10px;font-size:13px;color:#94a3b8;">Najlepsze wyniki wg IP (ostatni oktet widoczny).</p>
+			<ul id="leaderboardList" class="lb-list"></ul>
+			<button type="button" id="submitLbBtn" class="main" style="width:100%;margin-top:12px;">Zapisz moj wynik</button>
+			<p id="soloScoreLine" style="margin:12px 0 0;font-size:16px;font-weight:700;">Punkty w tej sesji: 0</p>
+			<p class="lb-muted">Sesja wygasa po kilku godzinach bez aktywnosci.</p>
+		</aside>
+	</div>
+
+	<audio id="quizAudio" preload="auto" playsinline></audio>
+
+	<script>
+		const API_BASE_URL = window.API_BASE_URL || window.location.origin;
+		const myPlayer = 1;
+		const QUIZ_REVEAL_WAIT_MS = 11000;
+
+		const startGameBtn = document.getElementById("startGameBtn");
+		const nextTrackBtn = document.getElementById("nextTrackBtn");
+		const revealPanel = document.getElementById("revealPanel");
+		const volumeRange = document.getElementById("volumeRange");
+		const volumeLabel = document.getElementById("volumeLabel");
+		const quizProgressFill = document.getElementById("quizProgressFill");
+		const quizProgressWrap = document.getElementById("quizProgressWrap");
+		const quizPhaseBadge = document.getElementById("quizPhaseBadge");
+		const guessForm = document.getElementById("guessForm");
+		const guessInput = document.getElementById("guessInput");
+		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
+		const guessSuggestList = document.getElementById("guessSuggestList");
+		const result = document.getElementById("result");
+		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
+		const statusEl = document.getElementById("statusEl");
+		const leaderboardList = document.getElementById("leaderboardList");
+		const submitLbBtn = document.getElementById("submitLbBtn");
+		const soloScoreLine = document.getElementById("soloScoreLine");
+		const quizAudio = document.getElementById("quizAudio");
+
+		let sessionId = "";
+		let currentState = null;
+		let localVolume = 25;
+		let lastQuizCommandToken = 0;
+		let lastQuizListenTokenMine = 0;
+		let clipStopTimer = null;
+		let clipProgressRaf = null;
+		let suggestDebounceTimer = null;
+		let suggestHideTimer = null;
+		let guessSubmitInFlight = false;
+		let soloRevealTimer = null;
+		let nextRoundBusy = false;
+
+		function buildApiUrl(path) {
+			return String(API_BASE_URL || "").replace(/\/+$/, "") + path;
+		}
+
+		function getVolumeStorageKey() {
+			return "quiz_solo_volume";
+		}
+
+		function clampVolume(v) {
+			const n = Number(v);
+			if (!Number.isFinite(n)) {
+				return 25;
+			}
+			return Math.max(0, Math.min(100, Math.floor(n)));
+		}
+
+		function escapeHtml(s) {
+			return String(s || "")
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function guessHistoryEntryText(entry) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.text !== undefined) {
+				return String(entry.text || "").trim();
+			}
+			return String(entry || "").trim();
+		}
+
+		function guessHistoryEntryKind(entry) {
+			if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.kind) {
+				const k = String(entry.kind);
+				if (k === "artist_hint") {
+					return "artist_hint";
+				}
+				if (k === "correct") {
+					return "correct";
+				}
+				if (k === "skip") {
+					return "skip";
+				}
+				return "wrong";
+			}
+			return "wrong";
+		}
+
+		function formatGuessTitleArtistHtml(raw) {
+			const s = String(raw || "").trim();
+			const parts = s.split(/\s+-\s+/);
+			if (parts.length >= 2) {
+				const utwor = parts[0].trim();
+				const artysta = parts.slice(1).join(" - ").trim();
+				return (
+					'<div class="guess-hist-pair">' +
+					'<div class="guess-hist-line"><span class="guess-hist-lbl">Utwor:</span> ' +
+					escapeHtml(utwor) +
+					"</div>" +
+					'<div class="guess-hist-line"><span class="guess-hist-lbl">Artysta:</span> ' +
+					escapeHtml(artysta) +
+					"</div></div>"
+				);
+			}
+			return '<div class="guess-hist-plain">' + escapeHtml(s) + "</div>";
+		}
+
+		function formatGuessHistoryListItem(entry) {
+			const raw = guessHistoryEntryText(entry);
+			const kind = guessHistoryEntryKind(entry);
+			let cssKind = "wrong";
+			if (kind === "artist_hint") {
+				cssKind = "artist_hint";
+			} else if (kind === "correct") {
+				cssKind = "correct";
+			} else if (kind === "skip") {
+				cssKind = "skip";
+			}
+			const body =
+				kind === "skip"
+					? '<div class="guess-hist-plain">' + escapeHtml("SKIP") + "</div>"
+					: formatGuessTitleArtistHtml(raw);
+			return (
+				'<li class="guess-hist-item guess-hist-item--' + cssKind + '">' + body + "</li>"
+			);
+		}
+
+		function setStatus(msg) {
+			statusEl.textContent = "Status: " + String(msg || "");
+		}
+
+		async function fetchJson(path, options) {
+			const response = await fetch(buildApiUrl(path), options || {});
+			let data = null;
+			try {
+				data = await response.json();
+			} catch (err1) {
+				data = null;
+			}
+			if (!response.ok) {
+				const text = data && data.error ? String(data.error) : "HTTP " + response.status;
+				throw new Error(text);
+			}
+			return data || {};
+		}
+
+		function isPlayerGuessed(p) {
+			const g = currentState && currentState.quizGuessedPlayers ? currentState.quizGuessedPlayers[String(p)] : false;
+			return Boolean(g);
+		}
+
+		function isQuizWrong(p) {
+			const w = currentState && currentState.quizWrongPlayers ? currentState.quizWrongPlayers[String(p)] : false;
+			return Boolean(w);
+		}
+
+		function clearSoloRevealTimer() {
+			if (soloRevealTimer) {
+				clearTimeout(soloRevealTimer);
+				soloRevealTimer = null;
+			}
+		}
+
+		function updateByState(state) {
+			currentState = state;
+			clearSoloRevealTimer();
+			const revealOn = Boolean(state.quizRevealActive);
+			const roundOn = Boolean(state.quizRoundActive);
+			const sid = String(state.sessionId || "").trim();
+			if (sid) {
+				sessionId = sid;
+			}
+
+			const sc = Number(state.scores && state.scores["1"] != null ? state.scores["1"] : state.soloScore || 0);
+			soloScoreLine.textContent = "Punkty w tej sesji: " + String(sc);
+
+			if (revealOn) {
+				const tit = String(state.quizTrackTitle || "").trim();
+				const art = String(state.quizTrackArtist || "").trim();
+				let html = "";
+				if (tit || art) {
+					html =
+						(tit ? '<div class="reveal-title-line">' + escapeHtml(tit) + "</div>" : "") +
+						(art ? '<div class="reveal-artist-line">' + escapeHtml(art) + "</div>" : "");
+				}
+				revealPanel.innerHTML = html;
+				revealPanel.classList.toggle("reveal-chorus", Boolean(state.quizRevealSeekMiddle));
+				revealPanel.classList.remove("hidden");
+				nextTrackBtn.disabled = false;
+				guessInput.disabled = true;
+				skipPhaseBtn.disabled = true;
+				soloRevealTimer = setTimeout(function () {
+					nextTrackAfterReveal();
+				}, QUIZ_REVEAL_WAIT_MS);
+			} else {
+				revealPanel.innerHTML = "";
+				revealPanel.classList.remove("reveal-chorus");
+				revealPanel.classList.add("hidden");
+				nextTrackBtn.disabled = true;
+				guessInput.disabled = isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer) || !roundOn;
+				skipPhaseBtn.disabled = guessInput.disabled;
+			}
+
+			const gh = state.quizGuessHistory && Array.isArray(state.quizGuessHistory["1"])
+				? state.quizGuessHistory["1"]
+				: [];
+			if ((roundOn || revealOn) && gh.length > 0) {
+				let histItems = "";
+				for (let hi = 0; hi < gh.length; hi = hi + 1) {
+					histItems = histItems + formatGuessHistoryListItem(gh[hi]);
+				}
+				guessHistoryPanel.innerHTML = "<ol>" + histItems + "</ol>";
+				guessHistoryPanel.classList.remove("hidden");
+			} else {
+				guessHistoryPanel.innerHTML = "";
+				guessHistoryPanel.classList.add("hidden");
+			}
+
+			const dursBadge = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
+			const ptsBadge = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [4, 3, 2, 1];
+			const lpMapB = state.quizListenPhases || {};
+			let idxB = Number(lpMapB["1"]);
+			if (!Number.isFinite(idxB)) {
+				idxB = 0;
+			}
+			idxB = Math.max(0, Math.min(Math.floor(idxB), dursBadge.length - 1));
+			const secB = Number(dursBadge[idxB]);
+			const ptB = ptsBadge[idxB] !== undefined ? ptsBadge[idxB] : 4;
+			const skipsMap = state.quizSkipsUsed || {};
+			const skipsUsed = Number(skipsMap["1"] != null ? skipsMap["1"] : 0);
+			if (roundOn && !revealOn && !isQuizWrong(myPlayer) && !isPlayerGuessed(myPlayer) && Number.isFinite(secB)) {
+				quizPhaseBadge.textContent =
+					"Faza " +
+					String(idxB + 1) +
+					"/4 · " +
+					String(ptB) +
+					" pkt przy trafieniu (0 jesli nietrafione) · do " +
+					String(secB) +
+					" s sluchu · skip " +
+					String(skipsUsed) +
+					"/4";
+				quizPhaseBadge.classList.remove("hidden");
+			} else {
+				quizPhaseBadge.textContent = "";
+				quizPhaseBadge.classList.add("hidden");
+			}
+
+			const token = Number(state.quizCommandToken || 0);
+			const ltMap = state.quizListenTokens || {};
+			const ltMine = Number(ltMap["1"] != null ? ltMap["1"] : 0);
+			const roundGuess = Boolean(state.quizRoundActive) && !Boolean(state.quizRevealActive);
+			if (token > lastQuizCommandToken) {
+				lastQuizCommandToken = token;
+				lastQuizListenTokenMine = ltMine;
+				playQuizClipFromState(state);
+			} else if (roundGuess && ltMine > lastQuizListenTokenMine) {
+				lastQuizListenTokenMine = ltMine;
+				playQuizClipFromState(state);
+			}
+		}
+
+		function stopClipProgress() {
+			if (clipProgressRaf !== null) {
+				cancelAnimationFrame(clipProgressRaf);
+				clipProgressRaf = null;
+			}
+			quizProgressFill.style.width = "0%";
+			quizProgressFill.classList.remove("reveal");
+		}
+
+		function startClipProgress(windowStartSec, windowDurSec, isRevealPhase) {
+			stopClipProgress();
+			if (quizProgressWrap) {
+				quizProgressWrap.classList.add("quiz-progress-wrap--playing");
+			}
+			const dur = Math.max(0.001, Number(windowDurSec) || 1);
+			const start = Number(windowStartSec) || 0;
+			if (isRevealPhase) {
+				quizProgressFill.classList.add("reveal");
+			}
+			function tick() {
+				clipProgressRaf = null;
+				let elapsed = (Number(quizAudio.currentTime) || 0) - start;
+				if (!Number.isFinite(elapsed)) {
+					elapsed = 0;
+				}
+				let p = elapsed / dur;
+				if (p < 0) {
+					p = 0;
+				}
+				if (p > 1) {
+					p = 1;
+				}
+				quizProgressFill.style.width = (p * 100) + "%";
+				if (p < 1 && !quizAudio.paused) {
+					clipProgressRaf = requestAnimationFrame(tick);
+				}
+			}
+			clipProgressRaf = requestAnimationFrame(tick);
+		}
+
+		function stopCurrentClip() {
+			if (clipStopTimer) {
+				clearTimeout(clipStopTimer);
+				clipStopTimer = null;
+			}
+			if (quizProgressWrap) {
+				quizProgressWrap.classList.remove("quiz-progress-wrap--playing");
+			}
+			stopClipProgress();
+			quizAudio.pause();
+			try {
+				quizAudio.currentTime = 0;
+			} catch (e0) {
+				return;
+			}
+		}
+
+		function normalizedAudioUrl(u) {
+			const s = String(u || "").trim();
+			if (!s) {
+				return "";
+			}
+			try {
+				return new URL(s, document.baseURI).href;
+			} catch (err) {
+				return s;
+			}
+		}
+
+		function quizAudioUrlsMatch(currentRaw, nextRaw) {
+			const a = normalizedAudioUrl(currentRaw);
+			const b = normalizedAudioUrl(nextRaw);
+			return a !== "" && b !== "" && a === b;
+		}
+
+		function waitQuizAudioCanPlay() {
+			return new Promise(function (resolve, reject) {
+				if (quizAudio.readyState >= 2) {
+					resolve();
+					return;
+				}
+				const onOk = function () {
+					quizAudio.removeEventListener("canplay", onOk);
+					quizAudio.removeEventListener("error", onBad);
+					resolve();
+				};
+				const onBad = function () {
+					quizAudio.removeEventListener("canplay", onOk);
+					quizAudio.removeEventListener("error", onBad);
+					reject(new Error("brak audio"));
+				};
+				quizAudio.addEventListener("canplay", onOk, { once: true });
+				quizAudio.addEventListener("error", onBad, { once: true });
+			});
+		}
+
+		function seekQuizAudioToStart() {
+			return new Promise(function (resolve) {
+				let settled = false;
+				function fin() {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					try {
+						quizAudio.removeEventListener("seeked", fin);
+					} catch (e0) {}
+					resolve();
+				}
+				try {
+					quizAudio.pause();
+				} catch (e1) {}
+				try {
+					quizAudio.currentTime = 0;
+				} catch (e2) {
+					fin();
+					return;
+				}
+				quizAudio.addEventListener("seeked", fin, { once: true });
+				window.setTimeout(fin, 120);
+			});
+		}
+
+		function playRevealChorusHint(durationSec) {
+			const onMeta = function () {
+				quizAudio.removeEventListener("loadedmetadata", onMeta);
+				let d = quizAudio.duration;
+				if (!Number.isFinite(d) || d <= 0) {
+					d = 30;
+				}
+				const dur = Math.max(0.001, Number(durationSec) || 1);
+				let start = Math.max(0, d - dur);
+				try {
+					quizAudio.currentTime = start;
+				} catch (err1) {
+					start = 0;
+				}
+				quizAudio.play().then(function () {
+					clipStopTimer = setTimeout(function () {
+						stopCurrentClip();
+					}, dur * 1000);
+					startClipProgress(start, dur, true);
+				}).catch(function () {
+					setStatus("nie mozna odtworzyc ujawnienia");
+				});
+			};
+			if (quizAudio.readyState >= 1) {
+				onMeta();
+			} else {
+				quizAudio.addEventListener("loadedmetadata", onMeta);
+			}
+		}
+
+		async function playQuizClipFromState(state) {
+			const previewUrl = String(state.quizPreviewUrl || "").trim();
+			const reveal = Boolean(state.quizRevealActive);
+			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
+			let durationSec = Number(state.quizCommandDurationSec || 0);
+			if (!previewUrl) {
+				return;
+			}
+			if (!reveal && !seekMiddle) {
+				if (isPlayerGuessed(myPlayer)) {
+					return;
+				}
+				if (isQuizWrong(myPlayer)) {
+					return;
+				}
+				const durs = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
+				const lpMap = state.quizListenPhases || {};
+				let idx = Number(lpMap["1"]);
+				if (!Number.isFinite(idx)) {
+					idx = 0;
+				}
+				idx = Math.max(0, Math.min(Math.floor(idx), durs.length - 1));
+				const tier = Number(durs[idx]);
+				if (Number.isFinite(tier) && tier > 0) {
+					durationSec = tier;
+				}
+			}
+			if (durationSec <= 0) {
+				return;
+			}
+			stopCurrentClip();
+			const curSrc = quizAudio.currentSrc || quizAudio.src || "";
+			if (!quizAudioUrlsMatch(curSrc, previewUrl)) {
+				quizAudio.src = previewUrl;
+				try {
+					quizAudio.load();
+				} catch (errLoad) {
+					return;
+				}
+				try {
+					await waitQuizAudioCanPlay();
+				} catch (errWait) {
+					setStatus("blad ladowania audio");
+					return;
+				}
+			}
+			quizAudio.volume = localVolume / 100;
+			try {
+				if (reveal && seekMiddle) {
+					playRevealChorusHint(durationSec);
+					return;
+				}
+				await seekQuizAudioToStart();
+				await quizAudio.play();
+				startClipProgress(0, durationSec, Boolean(reveal));
+				clipStopTimer = setTimeout(function () {
+					stopCurrentClip();
+				}, durationSec * 1000);
+			} catch (err) {
+				setStatus("autoplay zablokowany lub blad odtwarzania");
+			}
+		}
+
+		async function startNewGame() {
+			startGameBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/quiz-solo/new-game", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({})
+				});
+				lastQuizCommandToken = 0;
+				lastQuizListenTokenMine = 0;
+				updateByState(data.state);
+				guessInput.value = "";
+				result.textContent = "";
+				setStatus("online");
+			} catch (err) {
+				setStatus(err && err.message ? String(err.message) : "blad");
+			} finally {
+				startGameBtn.disabled = false;
+			}
+		}
+
+		async function nextTrackAfterReveal() {
+			if (!sessionId || nextRoundBusy) {
+				return;
+			}
+			nextRoundBusy = true;
+			clearSoloRevealTimer();
+			nextTrackBtn.disabled = true;
+			try {
+				const data = await fetchJson("/api/quiz-solo/next-round", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ sessionId: sessionId })
+				});
+				guessInput.value = "";
+				result.textContent = "";
+				updateByState(data.state);
+				setStatus("online");
+			} catch (err) {
+				setStatus(err && err.message ? String(err.message) : "blad");
+			} finally {
+				nextRoundBusy = false;
+			}
+		}
+
+		async function markGuess() {
+			if (!sessionId || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
+				return;
+			}
+			if (guessInput.disabled) {
+				return;
+			}
+			if (guessSubmitInFlight) {
+				return;
+			}
+			const text = String(guessInput.value || "").trim();
+			if (text.length < 3) {
+				setStatus("za krotko");
+				return;
+			}
+			guessSubmitInFlight = true;
+			guessSuggestList.classList.add("hidden");
+			guessSuggestList.innerHTML = "";
+			try {
+				const data = await fetchJson("/api/quiz-solo/guess", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ sessionId: sessionId, guess: text })
+				});
+				updateByState(data.state);
+				if (data.guessWrong) {
+					guessInput.value = "";
+					result.textContent = "Zle";
+					result.style.color = "#f87171";
+				} else if (data.artistHintOnly) {
+					result.textContent = "Tylko artysta — sluchaj dalej";
+					result.style.color = "#fbbf24";
+				} else {
+					guessInput.value = "";
+					result.textContent = "";
+					result.style.color = "";
+				}
+				setStatus("online");
+			} catch (err) {
+				setStatus(err && err.message ? String(err.message) : "blad");
+			} finally {
+				guessSubmitInFlight = false;
+			}
+		}
+
+		async function skipPhase() {
+			if (!sessionId || guessInput.disabled) {
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-solo/skip-phase", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ sessionId: sessionId })
+				});
+				updateByState(data.state);
+				setStatus("online");
+			} catch (err) {
+				setStatus(err && err.message ? String(err.message) : "blad");
+			}
+		}
+
+		async function submitLeaderboard() {
+			if (!sessionId) {
+				setStatus("najpierw rozpocznij gre");
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-solo/leaderboard-submit", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ sessionId: sessionId })
+				});
+				setStatus("zapisano (best: " + String(data.bestScore) + ")");
+				loadLeaderboard();
+			} catch (err) {
+				setStatus(err && err.message ? String(err.message) : "blad zapisu");
+			}
+		}
+
+		async function loadLeaderboard() {
+			try {
+				const data = await fetchJson("/api/quiz-solo/leaderboard");
+				const entries = Array.isArray(data.entries) ? data.entries : [];
+				let rows = "";
+				for (let i = 0; i < entries.length; i = i + 1) {
+					const e = entries[i];
+					rows =
+						rows +
+						'<li class="lb-row"><span class="lb-rank">' +
+						String(i + 1) +
+						'</span><span>' +
+						escapeHtml(e.label || "?") +
+						'</span><span>' +
+						String(e.bestScore != null ? e.bestScore : 0) +
+						" pkt</span></li>";
+				}
+				if (!rows) {
+					rows = '<li class="lb-row" style="grid-template-columns:1fr;">Brak wpisow</li>';
+				}
+				leaderboardList.innerHTML = rows;
+			} catch (err) {
+				leaderboardList.innerHTML = '<li class="lb-row">Brak rankingu</li>';
+			}
+		}
+
+		function hideGuessSuggest() {
+			guessSuggestList.classList.add("hidden");
+			guessSuggestList.innerHTML = "";
+		}
+
+		function scheduleDeezerSuggest() {
+			if (suggestDebounceTimer) {
+				clearTimeout(suggestDebounceTimer);
+			}
+			suggestDebounceTimer = setTimeout(runDeezerSuggest, 480);
+		}
+
+		async function runDeezerSuggest() {
+			suggestDebounceTimer = null;
+			const term = String(guessInput.value || "").trim();
+			if (term.length < 2) {
+				hideGuessSuggest();
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/deezer-search?q=" + encodeURIComponent(term) + "&limit=18");
+				const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+				if (!tracks.length) {
+					hideGuessSuggest();
+					return;
+				}
+				let items = "";
+				for (let idx = 0; idx < tracks.length; idx = idx + 1) {
+					const lab = String(tracks[idx].label || "Utwor").replace(/</g, "").replace(/"/g, "");
+					items = items + '<li><button type="button" class="guess-suggest-item" data-idx="' + idx + '">' + lab + "</button></li>";
+				}
+				guessSuggestList.innerHTML = items;
+				guessSuggestList.classList.remove("hidden");
+				const buttons = guessSuggestList.querySelectorAll(".guess-suggest-item");
+				buttons.forEach(function (btn) {
+					btn.addEventListener("mousedown", function (event) {
+						event.preventDefault();
+					});
+					btn.addEventListener("click", function () {
+						const ix = Number(btn.getAttribute("data-idx"));
+						const picked = tracks[ix];
+						if (!picked) {
+							return;
+						}
+						guessInput.value = String(picked.label || "");
+						hideGuessSuggest();
+						if (String(guessInput.value || "").trim().length >= 3) {
+							markGuess();
+						}
+					});
+				});
+			} catch (err) {
+				hideGuessSuggest();
+			}
+		}
+
+		function applyVolume() {
+			quizAudio.volume = localVolume / 100;
+			volumeLabel.textContent = String(localVolume) + "%";
+		}
+
+		function loadVolume() {
+			const raw = localStorage.getItem(getVolumeStorageKey());
+			if (raw === null || String(raw).trim() === "") {
+				localVolume = 25;
+			} else {
+				localVolume = clampVolume(raw);
+			}
+			volumeRange.value = String(localVolume);
+			applyVolume();
+		}
+
+		loadVolume();
+		loadLeaderboard();
+
+		volumeRange.addEventListener("input", function () {
+			localVolume = clampVolume(volumeRange.value);
+			volumeRange.value = String(localVolume);
+			localStorage.setItem(getVolumeStorageKey(), String(localVolume));
+			applyVolume();
+		});
+		guessInput.addEventListener("input", scheduleDeezerSuggest);
+		guessInput.addEventListener("focus", scheduleDeezerSuggest);
+		guessInput.addEventListener("blur", function () {
+			if (suggestHideTimer) {
+				clearTimeout(suggestHideTimer);
+			}
+			suggestHideTimer = setTimeout(hideGuessSuggest, 200);
+		});
+		guessForm.addEventListener("submit", function (event) {
+			event.preventDefault();
+			markGuess();
+		});
+		skipPhaseBtn.addEventListener("click", skipPhase);
+		startGameBtn.addEventListener("click", startNewGame);
+		nextTrackBtn.addEventListener("click", nextTrackAfterReveal);
+		submitLbBtn.addEventListener("click", submitLeaderboard);
+	</script>
+</body>
+</html>
