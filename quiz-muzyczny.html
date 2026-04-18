@@ -4,7 +4,7 @@
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<link rel="icon" href="data:," />
-	<title>Quiz muzyczny Deezer</title>
+	<title>Quiz muzyczny</title>
 	<style>
 		:root {
 			color-scheme: dark;
@@ -502,12 +502,135 @@
 				grid-template-columns: 1fr 1fr;
 			}
 		}
+
+		.quiz-end-overlay {
+			position: fixed;
+			left: 0;
+			top: 0;
+			right: 0;
+			bottom: 0;
+			z-index: 2000;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 20px;
+			box-sizing: border-box;
+			background: rgba(15, 23, 42, 0.82);
+			backdrop-filter: blur(6px);
+		}
+
+		.quiz-end-overlay.hidden {
+			display: none;
+		}
+
+		.quiz-end-modal {
+			width: min(520px, 100%);
+			max-height: min(88vh, 640px);
+			overflow: auto;
+			border-radius: 18px;
+			border: 2px solid #334155;
+			background: linear-gradient(165deg, #1e293b 0%, #0f172a 100%);
+			box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+			padding: 22px 22px 18px;
+			box-sizing: border-box;
+		}
+
+		.quiz-end-modal h2 {
+			margin: 0 0 8px;
+			font-size: 24px;
+			font-weight: 800;
+			text-align: center;
+			color: #f8fafc;
+		}
+
+		.quiz-end-subtitle {
+			margin: 0 0 10px;
+			font-size: 14px;
+			color: #94a3b8;
+			text-align: center;
+		}
+
+		.quiz-end-win-line {
+			margin: 0 0 16px;
+			padding: 12px 14px;
+			border-radius: 12px;
+			background: rgba(37, 99, 235, 0.2);
+			border: 1px solid #3b82f6;
+			font-size: 17px;
+			font-weight: 700;
+			text-align: center;
+			color: #e0f2fe;
+			line-height: 1.35;
+		}
+
+		.quiz-end-board {
+			display: grid;
+			gap: 8px;
+			margin-bottom: 18px;
+		}
+
+		.quiz-end-row {
+			display: grid;
+			grid-template-columns: 40px 48px minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 10px;
+			padding: 10px 12px;
+			border-radius: 12px;
+			background: #111827;
+			border: 1px solid #374151;
+			font-size: 15px;
+			font-weight: 600;
+		}
+
+		.quiz-end-row--first {
+			border-color: #eab308;
+			background: rgba(234, 179, 8, 0.12);
+		}
+
+		.quiz-end-row--me {
+			outline: 2px solid #38bdf8;
+			outline-offset: 0;
+		}
+
+		.quiz-end-rank {
+			font-weight: 800;
+			color: #94a3b8;
+			text-align: center;
+		}
+
+		.quiz-end-row--first .quiz-end-rank {
+			color: #fbbf24;
+		}
+
+		.quiz-end-name {
+			min-width: 0;
+			word-break: break-word;
+			color: #f1f5f9;
+		}
+
+		.quiz-end-pts {
+			font-variant-numeric: tabular-nums;
+			color: #a5b4fc;
+			white-space: nowrap;
+		}
+
+		.quiz-end-empty {
+			margin: 0;
+			text-align: center;
+			color: #94a3b8;
+			font-size: 14px;
+		}
+
+		.quiz-end-close-wrap {
+			display: flex;
+			justify-content: center;
+		}
 	</style>
 </head>
 <body>
 	<div class="app-layout">
 		<div class="panel">
-			<h1>Quiz muzyczny Deezer</h1>
+			<h1>Quiz muzyczny</h1>
 			<p class="me" id="meInfo"></p>
 			<div id="revealPanel" class="reveal-panel hidden"></div>
 
@@ -518,6 +641,14 @@
 					<input id="customMusicInput" type="text" placeholder="Zapytanie" />
 				</div>
 				<button id="saveMusicTypeBtn" class="main">Zapisz typ</button>
+			</div>
+			<div id="adminRoundLimitRow" class="section hidden">
+				<label for="quizRoundLimitInput">Limit utworów w sesji (0 = bez limitu)</label>
+				<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:6px;">
+					<input id="quizRoundLimitInput" type="number" min="0" max="9999" step="1" value="0" />
+					<button id="saveRoundLimitBtn" type="button" class="main">Zapisz limit</button>
+				</div>
+				<p id="quizRoundLimitHint" style="margin:8px 0 0;font-size:13px;color:#94a3b8;"></p>
 			</div>
 			<div id="adminRoundControls" class="phase-actions hidden">
 				<button id="startRoundBtn">Start</button>
@@ -540,6 +671,7 @@
 				</div>
 			</div>
 
+			<p id="quizLimitBanner" class="quiz-phase-badge hidden" style="color:#fbbf24;" aria-live="polite"></p>
 			<p id="quizPhaseBadge" class="quiz-phase-badge hidden" aria-live="polite"></p>
 			<div class="guess-autocomplete-wrap">
 				<form id="guessForm" class="guess-form" action="#" method="post">
@@ -565,6 +697,18 @@
 		</aside>
 	</div>
 
+	<div id="quizEndOverlay" class="quiz-end-overlay hidden" aria-hidden="true">
+		<div id="quizEndModal" class="quiz-end-modal" role="dialog" aria-modal="true" aria-labelledby="quizEndTitle">
+			<h2 id="quizEndTitle">Koniec sesji quizu</h2>
+			<p id="quizEndSubtitle" class="quiz-end-subtitle"></p>
+			<p id="quizEndWinLine" class="quiz-end-win-line"></p>
+			<div id="quizEndLeaderboard" class="quiz-end-board"></div>
+			<div class="quiz-end-close-wrap">
+				<button type="button" id="quizEndCloseBtn" class="main">Zamknij</button>
+			</div>
+		</div>
+	</div>
+
 	<audio id="quizAudio" preload="auto" playsinline></audio>
 
 	<script>
@@ -580,6 +724,11 @@
 		const customMusicWrap = document.getElementById("customMusicWrap");
 		const customMusicInput = document.getElementById("customMusicInput");
 		const saveMusicTypeBtn = document.getElementById("saveMusicTypeBtn");
+		const adminRoundLimitRow = document.getElementById("adminRoundLimitRow");
+		const quizRoundLimitInput = document.getElementById("quizRoundLimitInput");
+		const saveRoundLimitBtn = document.getElementById("saveRoundLimitBtn");
+		const quizRoundLimitHint = document.getElementById("quizRoundLimitHint");
+		const quizLimitBanner = document.getElementById("quizLimitBanner");
 		const startRoundBtn = document.getElementById("startRoundBtn");
 		const nextPhaseBtn = document.getElementById("nextPhaseBtn");
 		const autoToggleBtn = document.getElementById("autoToggleBtn");
@@ -599,6 +748,12 @@
 		const statusEl = document.getElementById("status");
 		const myScore = document.getElementById("myScore");
 		const scoreboard = document.getElementById("scoreboard");
+		const quizEndOverlay = document.getElementById("quizEndOverlay");
+		const quizEndModal = document.getElementById("quizEndModal");
+		const quizEndSubtitle = document.getElementById("quizEndSubtitle");
+		const quizEndWinLine = document.getElementById("quizEndWinLine");
+		const quizEndLeaderboard = document.getElementById("quizEndLeaderboard");
+		const quizEndCloseBtn = document.getElementById("quizEndCloseBtn");
 		const quizAudio = document.getElementById("quizAudio");
 
 		let myPlayer = null;
@@ -626,6 +781,8 @@
 		let suggestDebounceTimer = null;
 		let suggestHideTimer = null;
 		let musicPresetDirty = false;
+		let guessSubmitInFlight = false;
+		let quizEndOverlayDismissed = false;
 
 		const MUSIC_PRESETS = [
 			{ value: "hiphop_years_2022_2026", label: "Polski rap / hip-hop (2022-2026)" },
@@ -686,6 +843,7 @@
 
 		function updateAdminUi() {
 			adminMusicSetup.classList.toggle("hidden", !isAdmin());
+			adminRoundLimitRow.classList.toggle("hidden", !isAdmin());
 			adminRoundControls.classList.toggle("hidden", !isAdmin());
 			autoToggleBtn.textContent = autoAdvanceEnabled ? "Auto: ON" : "Auto: OFF";
 		}
@@ -730,6 +888,33 @@
 				return String(customMusicInput.value || "").trim();
 			}
 			return String(musicPreset.value || "").trim();
+		}
+
+		async function saveRoundLimit() {
+			if (!isAdmin()) {
+				return;
+			}
+			const raw = String(quizRoundLimitInput.value || "").trim();
+			let n = parseInt(raw, 10);
+			if (!Number.isFinite(n) || n < 0) {
+				setStatus("nieprawidlowy limit (0–9999)");
+				return;
+			}
+			if (n > 9999) {
+				n = 9999;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-round-limit", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name: myName, roundLimit: n })
+				});
+				updateByState(data.state);
+				setStatus("OK — limit zapisany, licznik sesji wyzerowany");
+			} catch (err) {
+				const msg = err && err.message ? String(err.message) : "blad zapisu limitu";
+				setStatus(msg);
+			}
 		}
 
 		async function saveMusicType() {
@@ -833,7 +1018,7 @@
 			}
 			const body =
 				kind === "skip"
-					? '<div class="guess-hist-plain">' + escapeHtml(raw) + "</div>"
+					? '<div class="guess-hist-plain">' + escapeHtml("SKIP") + "</div>"
 					: formatGuessTitleArtistHtml(raw);
 			return (
 				'<li class="guess-hist-item guess-hist-item--' + cssKind + '">' + body + "</li>"
@@ -859,11 +1044,27 @@
 
 		function renderScoreboard() {
 			const roundOn = currentState && Boolean(currentState.quizRoundActive);
-			const rows = [];
+			const items = [];
 			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
 				const key = String(i);
 				const label = currentPlayerNames[key] ? String(currentPlayerNames[key]) : "Gracz " + i;
 				const score = toIntScore(currentScores[key]);
+				items.push({ i: i, key: key, label: label, score: score });
+			}
+			// Najważniejsze: ranking malejąco po punktach (najwięcej na górze), przy remisie niższy numer gracza.
+			items.sort(function (a, b) {
+				if (b.score !== a.score) {
+					return b.score - a.score;
+				}
+				return a.i - b.i;
+			});
+			const rows = [];
+			for (let j = 0; j < items.length; j = j + 1) {
+				const it = items[j];
+				const i = it.i;
+				const key = it.key;
+				const label = it.label;
+				const score = it.score;
 				let rowClass = "score-row";
 				if (i === myPlayer) {
 					rowClass = rowClass + " me-row";
@@ -894,6 +1095,109 @@
 			myScore.textContent = "Twoje punkty: " + points;
 		}
 
+		function hideQuizEndOverlay() {
+			quizEndOverlay.classList.add("hidden");
+			quizEndOverlay.setAttribute("aria-hidden", "true");
+		}
+
+		function dismissQuizEndOverlay() {
+			quizEndOverlayDismissed = true;
+			hideQuizEndOverlay();
+		}
+
+		function updateQuizEndOverlay(state, roundOn, revealOn, exhausted) {
+			// Najważniejsze: pełnoekranowy leaderboard po osiągnięciu limitu utworów (koniec sesji).
+			if (!exhausted || roundOn || revealOn) {
+				quizEndOverlayDismissed = false;
+				hideQuizEndOverlay();
+				return;
+			}
+			if (quizEndOverlayDismissed) {
+				hideQuizEndOverlay();
+				return;
+			}
+			quizEndOverlay.classList.remove("hidden");
+			quizEndOverlay.setAttribute("aria-hidden", "false");
+			const lim = Number(state.quizRoundLimit || 0);
+			const played = Number(state.quizRoundsPlayed || 0);
+			let sub = "Zagranych utworow w sesji: " + String(played);
+			if (lim > 0) {
+				sub = sub + " / " + String(lim);
+			}
+			quizEndSubtitle.textContent = sub;
+			const occ = [];
+			for (let i = 1; i <= MAX_PLAYERS; i = i + 1) {
+				const nm = currentPlayerNames[String(i)] ? String(currentPlayerNames[String(i)]) : "Gracz " + i;
+				if (isDefaultSlotName(i, nm)) {
+					continue;
+				}
+				occ.push({
+					i: i,
+					key: String(i),
+					label: nm,
+					score: toIntScore(currentScores[String(i)])
+				});
+			}
+			occ.sort(function (a, b) {
+				if (b.score !== a.score) {
+					return b.score - a.score;
+				}
+				return a.i - b.i;
+			});
+			let winText = "Brak graczy przy stole.";
+			if (occ.length > 0) {
+				const best = occ[0].score;
+				const names = [];
+				for (let t = 0; t < occ.length; t++) {
+					if (occ[t].score === best) {
+						names.push(occ[t].label);
+					} else {
+						break;
+					}
+				}
+				if (names.length === 1) {
+					winText = "Zwyciezca: " + names[0] + " (" + String(best) + " pkt)";
+				} else {
+					winText = "Remis o 1. miejsce: " + names.join(", ") + " (" + String(best) + " pkt)";
+				}
+			}
+			quizEndWinLine.textContent = winText;
+			let rows = "";
+			for (let r = 0; r < occ.length; r++) {
+				const it = occ[r];
+				const place = r + 1;
+				let rowClass = "quiz-end-row";
+				if (it.i === myPlayer) {
+					rowClass = rowClass + " quiz-end-row--me";
+				}
+				if (place === 1) {
+					rowClass = rowClass + " quiz-end-row--first";
+				}
+				rows =
+					rows +
+					'<div class="' +
+					rowClass +
+					'">' +
+					'<span class="quiz-end-rank">' +
+					String(place) +
+					".</span>" +
+					buildAvatarHtml(it.key, it.label) +
+					'<span class="quiz-end-name">' +
+					escapeHtml(it.label) +
+					" (P" +
+					String(it.i) +
+					")</span>" +
+					'<span class="quiz-end-pts">' +
+					String(it.score) +
+					" pkt</span></div>";
+			}
+			if (!rows) {
+				quizEndLeaderboard.innerHTML = '<p class="quiz-end-empty">Brak aktywnych graczy.</p>';
+			} else {
+				quizEndLeaderboard.innerHTML = rows;
+			}
+		}
+
 		function applyVolume() {
 			quizAudio.volume = localVolume / 100;
 			volumeLabel.textContent = String(localVolume) + "%";
@@ -919,7 +1223,7 @@
 			if (suggestDebounceTimer) {
 				clearTimeout(suggestDebounceTimer);
 			}
-			suggestDebounceTimer = setTimeout(runDeezerSuggest, 320);
+			suggestDebounceTimer = setTimeout(runDeezerSuggest, 480);
 		}
 
 		async function runDeezerSuggest() {
@@ -1277,6 +1581,21 @@
 			if (isAdmin() && !musicPresetDirty) {
 				syncMusicControlsFromQuery(mq);
 			}
+			if (isAdmin() && document.activeElement !== quizRoundLimitInput) {
+				const limSync = Number(state.quizRoundLimit || 0);
+				if (Number.isFinite(limSync)) {
+					quizRoundLimitInput.value = String(limSync);
+				}
+			}
+			const limHint = Number(state.quizRoundLimit || 0);
+			const playedHint = Number(state.quizRoundsPlayed || 0);
+			if (limHint > 0) {
+				quizRoundLimitHint.textContent =
+					"Zagranych utworow w sesji: " + String(playedHint) + " / " + String(limHint);
+			} else {
+				quizRoundLimitHint.textContent =
+					"Bez limitu — zagranych utworow w tej sesji: " + String(playedHint);
+			}
 			if (revealOn) {
 				const ans = String(state.quizTrackLabel || "").trim();
 				const art = String(state.quizTrackArtist || "").trim();
@@ -1300,6 +1619,15 @@
 				revealPanel.classList.add("hidden");
 			}
 			const roundOn = Boolean(state.quizRoundActive);
+			const exhausted = Boolean(state.quizRoundsExhausted);
+			if (exhausted && !roundOn && !revealOn) {
+				quizLimitBanner.textContent =
+					"Sesja quizu: osiagniety limit utworow (sobik moze zwiekszyc limit lub zapisac limit od nowa).";
+				quizLimitBanner.classList.remove("hidden");
+			} else {
+				quizLimitBanner.textContent = "";
+				quizLimitBanner.classList.add("hidden");
+			}
 			const myWrong = isQuizWrong(myPlayer);
 			const myGuessHistory = Array.isArray(currentQuizGuessHistory[String(myPlayer)])
 				? currentQuizGuessHistory[String(myPlayer)]
@@ -1318,6 +1646,7 @@
 			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
 			skipPhaseBtn.disabled = guessInput.disabled;
 			const dursBadge = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
+			const ptsBadge = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [4, 3, 2, 1];
 			const lpMapB = state.quizListenPhases || {};
 			let idxB = Number(lpMapB[String(myPlayer)]);
 			if (!Number.isFinite(idxB)) {
@@ -1325,13 +1654,20 @@
 			}
 			idxB = Math.max(0, Math.min(Math.floor(idxB), dursBadge.length - 1));
 			const secB = Number(dursBadge[idxB]);
+			const ptB = ptsBadge[idxB] !== undefined ? ptsBadge[idxB] : 4;
+			const skipsMap = state.quizSkipsUsed || {};
+			const skipsUsed = Number(skipsMap[String(myPlayer)] != null ? skipsMap[String(myPlayer)] : 0);
 			if (roundOn && !revealOn && !myWrong && !isPlayerGuessed(myPlayer) && Number.isFinite(secB)) {
 				quizPhaseBadge.textContent =
 					"Faza " +
 					String(idxB + 1) +
-					"/4 · do " +
+					"/4 · " +
+					String(ptB) +
+					" pkt przy trafieniu (0 jesli nietrafione) · do " +
 					String(secB) +
-					" s sluchu (max 4 proby / ostatnia 6 s)";
+					" s sluchu · skip " +
+					String(skipsUsed) +
+					"/4";
 				quizPhaseBadge.classList.remove("hidden");
 			} else {
 				quizPhaseBadge.textContent = "";
@@ -1367,6 +1703,7 @@
 				playQuizClipFromState(state);
 			}
 			scheduleAutoAdvanceIfNeeded(state);
+			updateQuizEndOverlay(state, roundOn, revealOn, exhausted);
 			updateAdminUi();
 			renderScoreboard();
 		}
@@ -1410,11 +1747,15 @@
 			if (guessInput.disabled) {
 				return;
 			}
+			if (guessSubmitInFlight) {
+				return;
+			}
 			const text = String(guessInput.value || "").trim();
 			if (text.length < 3) {
 				setStatus("za krotko");
 				return;
 			}
+			guessSubmitInFlight = true;
 			hideGuessSuggest();
 			try {
 				const data = await fetchJson("/api/quiz-guess", {
@@ -1423,6 +1764,11 @@
 					body: JSON.stringify({ player: myPlayer, name: myName, guess: text })
 				});
 				updateByState(data.state);
+				if (data.alreadyGuessed || data.alreadyEliminated) {
+					guessInput.value = "";
+					setStatus("OK");
+					return;
+				}
 				if (data.guessWrong) {
 					guessInput.value = "";
 					setStatus("zle");
@@ -1438,6 +1784,8 @@
 				const msg = err && err.message ? String(err.message) : "blad";
 				setStatus(msg);
 				refreshState();
+			} finally {
+				guessSubmitInFlight = false;
 			}
 		}
 
@@ -1500,6 +1848,7 @@
 			musicPresetDirty = true;
 		});
 		saveMusicTypeBtn.addEventListener("click", saveMusicType);
+		saveRoundLimitBtn.addEventListener("click", saveRoundLimit);
 		startRoundBtn.addEventListener("click", startQuizRound);
 		nextPhaseBtn.addEventListener("click", requestNextPhase);
 		autoToggleBtn.addEventListener("click", () => {
@@ -1533,6 +1882,12 @@
 			markGuess();
 		});
 		skipPhaseBtn.addEventListener("click", skipPhase);
+		quizEndCloseBtn.addEventListener("click", dismissQuizEndOverlay);
+		quizEndOverlay.addEventListener("click", function (ev) {
+			if (ev.target === quizEndOverlay) {
+				dismissQuizEndOverlay();
+			}
+		});
 		window.addEventListener("pagehide", sendLeaveBeacon);
 	</script>
 </body>

@@ -168,7 +168,8 @@
 		</div>
 		<div class="buttons">
 			<button id="classicBtn">Tryb klasyczny</button>
-			<button id="deezerBtn">Quiz muzyczny Deezer</button>
+			<button id="quizMusicBtn">Quiz muzyczny</button>
+			<button id="quizSoloBtn">Quiz muzyczny — solo</button>
 			<button id="changeNickBtn" class="secondary">Zmien ksywe</button>
 		</div>
 	</div>
@@ -176,7 +177,8 @@
 	<script>
 		const meInfo = document.getElementById("meInfo");
 		const classicBtn = document.getElementById("classicBtn");
-		const deezerBtn = document.getElementById("deezerBtn");
+		const quizMusicBtn = document.getElementById("quizMusicBtn");
+		const quizSoloBtn = document.getElementById("quizSoloBtn");
 		const changeNickBtn = document.getElementById("changeNickBtn");
 		const presetGrid = document.getElementById("presetGrid");
 		const avatarClearBtn = document.getElementById("avatarClearBtn");
@@ -387,8 +389,11 @@
 		classicBtn.addEventListener("click", () => {
 			window.location.href = "szybkie-guziki.html";
 		});
-		deezerBtn.addEventListener("click", () => {
+		quizMusicBtn.addEventListener("click", () => {
 			window.location.href = "quiz-muzyczny.html";
+		});
+		quizSoloBtn.addEventListener("click", () => {
+			window.location.href = "quiz-muzyczny-solo.html";
 		});
 		changeNickBtn.addEventListener("click", () => {
 			localStorage.removeItem(getStorageKey("player"));

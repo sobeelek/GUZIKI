@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import secrets
 import ssl
 import sys
 import threading
@@ -20,6 +21,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CMR_DIR = os.path.join(DATA_DIR, "cmr")
 ORDERS_FILE = os.path.join(DATA_DIR, "driver_orders.json")
+QUIZ_SOLO_LEADERBOARD_FILE = os.path.join(DATA_DIR, "quiz_solo_leaderboard.json")
+SOLO_QUIZ_SESSIONS = {}
+SOLO_QUIZ_LOCK = threading.Lock()
+SOLO_SESSION_TTL_MS = 6 * 60 * 60 * 1000
 AVATAR_DIR = os.path.join(DATA_DIR, "avatars")
 AVATAR_PRESET_DIR = os.path.join(BASE_DIR, "avatar_presets")
 MAX_PLAYERS = 8
@@ -70,9 +75,26 @@ POLISH_SCENE_ARTIST_SEEDS = (
 	"Żabson",
 )
 QUIZ_PHASE_DURATIONS = [0.5, 2, 4, 6]
-QUIZ_PHASE_POINTS = [5, 3, 2, 1]
+QUIZ_PHASE_POINTS = [4, 3, 2, 1]
 QUIZ_REVEAL_CLIP_SEC = 10
+QUIZ_AFTER_REVEAL_NEXT_SEC = 1.0
+QUIZ_MAX_SKIPS_PER_ROUND = 4
 _DEEZER_LAST_FETCH_ERR = ""
+
+_POLISH_DIACRITICS_RE = re.compile(
+	r"[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b]"
+)
+
+SEARCH_POLISH_NAME_HINTS = (
+	"Malik Montana",
+	"Męskie Granie",
+	"Męskie Granie Orkiestra",
+	"Sanah",
+	"Dawid Podsiadło",
+	"Żabson",
+	"Quebonafide",
+	"Białas",
+)
 
 
 def _deezer_ssl_context():
@@ -148,6 +170,9 @@ BUZZER_STATE = {
 	"quiz_wrong_players": {},
 	"quiz_wrong_guesses": {},
 	"quiz_guess_history": {},
+	"quiz_skips_used": {},
+	"quiz_round_limit": 0,
+	"quiz_rounds_played": 0,
 	"quiz_ready_players": {},
 	"scores": _default_scores(),
 	"player_names": _default_player_names(),
@@ -336,6 +361,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_guess_history"][str(i)] = []
 			BUZZER_STATE["quiz_listen_phase"][str(i)] = 0
 			BUZZER_STATE["quiz_listen_token"][str(i)] = 0
+			BUZZER_STATE["quiz_skips_used"][str(i)] = 0
 
 	def _ensure_round_started(self):
 		if BUZZER_STATE["round_started_ms"] == 0:
@@ -490,6 +516,18 @@ class AppHandler(SimpleHTTPRequestHandler):
 				lp[key] = 0
 			if key not in ltok:
 				ltok[key] = 0
+		su = BUZZER_STATE.get("quiz_skips_used")
+		if not isinstance(su, dict):
+			BUZZER_STATE["quiz_skips_used"] = {}
+			su = BUZZER_STATE["quiz_skips_used"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in su:
+				su[key] = 0
+		if "quiz_round_limit" not in BUZZER_STATE:
+			BUZZER_STATE["quiz_round_limit"] = 0
+		if "quiz_rounds_played" not in BUZZER_STATE:
+			BUZZER_STATE["quiz_rounds_played"] = 0
 
 	def _append_quiz_guess_history(self, key, text, kind):
 		# Najważniejsze: lista prób — pelny tekst + rodzaj: correct | artist_hint | wrong | skip (kolory na kliencie).
@@ -507,6 +545,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 		k = str(kind or "").strip().lower()
 		if k not in ("artist_hint", "wrong", "correct", "skip"):
 			k = "wrong"
+		if k != "skip" and prev and isinstance(prev[-1], dict):
+			last = prev[-1]
+			if str(last.get("text") or "").strip() == line and str(last.get("kind") or "").lower() == k:
+				# Najważniejsze: ten sam wpis pod rząd (np. podwójne wysłanie zgadnięcia) — nie duplikuj listy; skip zawsze osobno.
+				return
 		prev.append({"text": line, "kind": k})
 		gh[key] = prev[-40:]
 
@@ -660,12 +703,16 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return True
 		return False
 
-	def _pick_random_quiz_track(self):
-		# Najważniejsze: losowy utwór z puli wyników Deezer dla zapytania ustawionego przez sobika (quiz_music_query — bez zmian miedzy rundami, np. rap 2022-2026).
+	def _build_quiz_track_pool_for_query(self, query_raw):
+		# Najważniejsze: pula utworów Deezer dla dowolnego zapytania (multiplayer + quiz solo) — bez mutacji BUZZER_STATE.
 		global _DEEZER_LAST_FETCH_ERR
 		_DEEZER_LAST_FETCH_ERR = ""
-		query = self._current_quiz_music_query()
-		apply_year = self._quiz_music_query_is_hiphop_year_range(query)
+		q = self._sanitize_music_query(query_raw)
+		if not q:
+			q = DEEZER_POLISH_HIPHOP_QUERY
+		if q == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
+			q = QUIZ_HIPHOP_YEAR_RANGE_QUERY
+		apply_year = self._quiz_music_query_is_hiphop_year_range(q)
 		seen_ids = set()
 		tracks = []
 
@@ -683,7 +730,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if len(tracks) < 30:
 			add_batch(self._fetch_deezer_polish_youth_quiz_pool(120, False))
 		if not apply_year and len(tracks) < 20:
-			add_batch(self._fetch_deezer_tracks(query, 100))
+			add_batch(self._fetch_deezer_tracks(q, 100))
 		if not tracks:
 			for term in ("Szpaku", "Sobel", "OKI", "polski rap", "polski hip hop", "rap"):
 				add_batch(self._fetch_deezer_tracks(term, 100))
@@ -691,6 +738,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 					break
 		if not tracks:
 			add_batch(self._fetch_deezer_chart_tracks(50))
+		return tracks
+
+	def _pick_random_quiz_track(self):
+		# Najważniejsze: losowy utwór z puli wyników Deezer dla zapytania ustawionego przez sobika (quiz_music_query — bez zmian miedzy rundami, np. rap 2022-2026).
+		tracks = self._build_quiz_track_pool_for_query(self._current_quiz_music_query())
 		if not tracks:
 			return None
 		random.shuffle(tracks)
@@ -701,8 +753,34 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return track
 		return tracks[0]
 
+	def _pick_random_quiz_track_excluding(self, query_raw, exclude_id):
+		# Najważniejsze: losowanie dla quizu solo — inny utwor niz poprzedni w sesji.
+		tracks = self._build_quiz_track_pool_for_query(query_raw)
+		if not tracks:
+			return None
+		random.shuffle(tracks)
+		ex = str(exclude_id or "").strip()
+		for track in tracks:
+			tid = str(track.get("id", "")).strip()
+			if tid and tid != ex:
+				return track
+		return tracks[0]
+
+	def _quiz_round_limit_reached(self):
+		# Najważniejsze: sesja quizu z limitem — nie startuj kolejnego utworu gdy wykorzystano pulę rund.
+		self._ensure_quiz_state()
+		limit = int(BUZZER_STATE.get("quiz_round_limit") or 0)
+		if limit <= 0:
+			return False
+		played = int(BUZZER_STATE.get("quiz_rounds_played") or 0)
+		return played >= limit
+
 	def _start_quiz_round(self):
 		self._ensure_quiz_state()
+		su = BUZZER_STATE.get("quiz_skips_used")
+		if not isinstance(su, dict):
+			BUZZER_STATE["quiz_skips_used"] = {}
+			su = BUZZER_STATE["quiz_skips_used"]
 		for i in range(1, MAX_PLAYERS + 1):
 			key = str(i)
 			BUZZER_STATE["quiz_guessed_players"][key] = False
@@ -712,6 +790,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_guess_history"][key] = []
 			BUZZER_STATE["quiz_listen_phase"][key] = 0
 			BUZZER_STATE["quiz_listen_token"][key] = 0
+			su[key] = 0
 		BUZZER_STATE["quiz_round_active"] = True
 		BUZZER_STATE["quiz_phase_index"] = 0
 		BUZZER_STATE["quiz_command_token"] = int(BUZZER_STATE["quiz_command_token"]) + 1
@@ -721,6 +800,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 	def _start_quiz_round_with_random_track(self):
 		# Najważniejsze: wspólna logika losowania utworu i startu fazy 1 (reczny start i auto-start).
 		cancel_quiz_auto_next_timer()
+		self._ensure_quiz_state()
+		if self._quiz_round_limit_reached():
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
+			return False
 		random_track = self._pick_random_quiz_track()
 		if random_track is None:
 			return False
@@ -732,6 +815,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		BUZZER_STATE["quiz_reveal_active"] = False
 		BUZZER_STATE["quiz_reveal_seek_middle"] = False
 		self._start_quiz_round()
+		BUZZER_STATE["quiz_rounds_played"] = int(BUZZER_STATE.get("quiz_rounds_played") or 0) + 1
 		BUZZER_STATE["last_update_ms"] = self._now_ms()
 		return True
 
@@ -876,6 +960,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"quizFinishedCount": self._count_finished_quiz_players(),
 			"quizListenPhases": dict(BUZZER_STATE.get("quiz_listen_phase") or {}),
 			"quizListenTokens": dict(BUZZER_STATE.get("quiz_listen_token") or {}),
+			"quizSkipsUsed": dict(BUZZER_STATE.get("quiz_skips_used") or {}),
+			"quizRoundLimit": int(BUZZER_STATE.get("quiz_round_limit") or 0),
+			"quizRoundsPlayed": int(BUZZER_STATE.get("quiz_rounds_played") or 0),
+			"quizRoundsExhausted": bool(
+				int(BUZZER_STATE.get("quiz_round_limit") or 0) > 0
+				and int(BUZZER_STATE.get("quiz_rounds_played") or 0)
+				>= int(BUZZER_STATE.get("quiz_round_limit") or 0)
+			),
 			"quizListenMaxSec": float(BUZZER_STATE.get("quiz_command_duration_sec") or 0),
 			"quizReadyPlayers": BUZZER_STATE["quiz_ready_players"],
 			"quizReadyCount": self._count_ready_players(),
@@ -886,6 +978,388 @@ class AppHandler(SimpleHTTPRequestHandler):
 			"playerAvatars": BUZZER_STATE["player_avatars"],
 			"lastUpdateMs": BUZZER_STATE["last_update_ms"],
 		}
+
+	def _client_ip(self):
+		xff = str(self.headers.get("X-Forwarded-For") or "").strip()
+		if xff:
+			return xff.split(",")[0].strip()[:80]
+		try:
+			return str(self.client_address[0])[:80]
+		except Exception:
+			return ""
+
+	def _prune_solo_sessions_unlocked(self):
+		now = self._now_ms()
+		todel = [
+			k
+			for k, s in SOLO_QUIZ_SESSIONS.items()
+			if now - int(s.get("created_ms", 0)) > SOLO_SESSION_TTL_MS
+		]
+		for k in todel:
+			del SOLO_QUIZ_SESSIONS[k]
+
+	def _solo_get_session(self, token):
+		with SOLO_QUIZ_LOCK:
+			self._prune_solo_sessions_unlocked()
+			return SOLO_QUIZ_SESSIONS.get(str(token or "").strip())
+
+	def _solo_start_round_with_track(self, sess, tr):
+		sess["track_id"] = str(tr.get("id", "")).strip()
+		sess["preview_url"] = str(tr.get("previewUrl", "")).strip()
+		sess["label"] = str(tr.get("label", "")).strip()[:120]
+		sess["title"] = str(tr.get("title", "") or "").strip()[:120]
+		sess["artist"] = str(tr.get("artist", "") or "").strip()[:120]
+		sess["round_active"] = True
+		sess["reveal_active"] = False
+		sess["reveal_seek_middle"] = False
+		sess["listen_phase"] = 0
+		sess["guessed"] = False
+		sess["wrong"] = False
+		sess["artist_hint"] = False
+		sess["skips_used"] = 0
+		sess["guess_history"] = []
+		sess["command_token"] = int(sess.get("command_token", 0)) + 1
+		sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+		idx = 0
+		sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[idx])
+		sess["issued_ms"] = self._now_ms()
+		with SOLO_QUIZ_LOCK:
+			SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+
+	def _solo_begin_reveal(self, sess):
+		sess["round_active"] = False
+		sess["reveal_active"] = True
+		sess["reveal_seek_middle"] = bool(not sess.get("guessed"))
+		sess["command_token"] = int(sess.get("command_token", 0)) + 1
+		sess["command_duration_sec"] = float(QUIZ_REVEAL_CLIP_SEC)
+		sess["issued_ms"] = self._now_ms()
+		with SOLO_QUIZ_LOCK:
+			SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+
+	def _public_solo_state(self, sess):
+		reveal = bool(sess.get("reveal_active"))
+		idx = int(sess.get("listen_phase", 0))
+		last_i = len(QUIZ_PHASE_DURATIONS) - 1
+		if idx < 0:
+			idx = 0
+		if idx > last_i:
+			idx = last_i
+		cmd_dur = float(QUIZ_REVEAL_CLIP_SEC) if reveal else float(QUIZ_PHASE_DURATIONS[idx])
+		show = reveal
+		ql = sess.get("label", "") if show else ""
+		qt = sess.get("title", "") if show else ""
+		qa = sess.get("artist", "") if show else ""
+		return {
+			"sessionId": sess["token"],
+			"quizMusicQuery": sess.get("music_query", ""),
+			"quizPreviewUrl": sess.get("preview_url", ""),
+			"quizTrackLabel": ql,
+			"quizTrackTitle": qt,
+			"quizTrackArtist": qa,
+			"quizTrackId": sess.get("track_id", ""),
+			"quizRevealActive": reveal,
+			"quizRevealSeekMiddle": bool(sess.get("reveal_seek_middle")),
+			"quizRoundActive": bool(sess.get("round_active")),
+			"quizCommandToken": int(sess.get("command_token", 0)),
+			"quizCommandDurationSec": cmd_dur,
+			"quizCommandIssuedMs": int(sess.get("issued_ms", 0)),
+			"quizPhaseDurations": QUIZ_PHASE_DURATIONS,
+			"quizPhasePoints": QUIZ_PHASE_POINTS,
+			"quizPhaseIndex": -1,
+			"quizListenPhases": {"1": idx},
+			"quizListenTokens": {"1": int(sess.get("listen_token", 0))},
+			"quizSkipsUsed": {"1": int(sess.get("skips_used", 0))},
+			"quizGuessHistory": {"1": list(sess.get("guess_history", []))},
+			"quizGuessedPlayers": {"1": bool(sess.get("guessed"))},
+			"quizWrongPlayers": {"1": bool(sess.get("wrong"))},
+			"scores": {"1": int(sess.get("total_score", 0))},
+			"soloMode": True,
+			"soloScore": int(sess.get("total_score", 0)),
+			"lastUpdateMs": int(sess.get("issued_ms", 0)),
+		}
+
+	def _solo_new_game(self, music_query_raw):
+		with SOLO_QUIZ_LOCK:
+			self._prune_solo_sessions_unlocked()
+			q = self._sanitize_music_query(music_query_raw) or DEEZER_POLISH_HIPHOP_QUERY
+			if q == QUIZ_HIPHOP_YEAR_QUERY_LEGACY:
+				q = QUIZ_HIPHOP_YEAR_RANGE_QUERY
+			tok = secrets.token_hex(20)
+			sess = {
+				"token": tok,
+				"music_query": q,
+				"created_ms": self._now_ms(),
+				"issued_ms": 0,
+				"command_token": 0,
+				"listen_token": 0,
+				"total_score": 0,
+			}
+			SOLO_QUIZ_SESSIONS[tok] = sess
+		tr = self._pick_random_quiz_track_excluding(sess["music_query"], "")
+		if not tr:
+			with SOLO_QUIZ_LOCK:
+				if tok in SOLO_QUIZ_SESSIONS:
+					del SOLO_QUIZ_SESSIONS[tok]
+			return None, "Brak utworow (Deezer niedostepny lub pusta pula)"
+		self._solo_start_round_with_track(sess, tr)
+		return sess, None
+
+	def _solo_next_round(self, sess):
+		tr = self._pick_random_quiz_track_excluding(sess.get("music_query"), sess.get("track_id"))
+		if not tr:
+			return False
+		self._solo_start_round_with_track(sess, tr)
+		return True
+
+	def _mask_ip_for_display(self, ip):
+		s = str(ip or "").strip()
+		if s.count(".") == 3:
+			parts = s.split(".")
+			return "•••.•••.•••." + parts[-1]
+		if ":" in s and len(s) > 4:
+			return "••••" + s[-4:]
+		return s[:24] if s else "?"
+
+	def _read_solo_leaderboard(self):
+		try:
+			with open(QUIZ_SOLO_LEADERBOARD_FILE, "r", encoding="utf-8") as f:
+				d = json.load(f)
+			if not isinstance(d, dict):
+				return {"byIp": {}}
+			by_ip = d.get("byIp")
+			if not isinstance(by_ip, dict):
+				return {"byIp": {}}
+			return {"byIp": by_ip}
+		except Exception:
+			return {"byIp": {}}
+
+	def _write_solo_leaderboard(self, data):
+		os.makedirs(DATA_DIR, exist_ok=True)
+		tmp = QUIZ_SOLO_LEADERBOARD_FILE + ".tmp"
+		with open(tmp, "w", encoding="utf-8") as f:
+			json.dump(data, f, ensure_ascii=False, indent=2)
+		os.replace(tmp, QUIZ_SOLO_LEADERBOARD_FILE)
+
+	def handle_quiz_solo_leaderboard_get(self):
+		try:
+			data = self._read_solo_leaderboard()
+			by_ip = data.get("byIp") or {}
+			rows = []
+			for ip, rec in by_ip.items():
+				if not isinstance(rec, dict):
+					continue
+				best = int(rec.get("bestScore", 0))
+				rows.append(
+					{
+						"label": self._mask_ip_for_display(ip),
+						"bestScore": best,
+						"updatedMs": int(rec.get("updatedMs", 0)),
+					}
+				)
+			rows.sort(key=lambda r: (-r["bestScore"], -r["updatedMs"]))
+			self.json_response({"entries": rows[:50]}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_solo_new_post(self):
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			sess, err = self._solo_new_game(parsed.get("musicQuery"))
+			if not sess:
+				self.json_response({"error": err or "Brak utworow"}, 500)
+				return
+			self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_solo_next_round_post(self):
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			sid = str(parsed.get("sessionId") or "").strip()
+			sess = self._solo_get_session(sid)
+			if not sess:
+				self.json_response({"error": "Nieprawidlowa lub wygasla sesja"}, 400)
+				return
+			if bool(sess.get("round_active")):
+				self.json_response({"error": "Najpierw dokoncz runde"}, 400)
+				return
+			if not bool(sess.get("reveal_active")):
+				self.json_response({"error": "Brak fazy ujawnienia"}, 400)
+				return
+			if not self._solo_next_round(sess):
+				msg = "No Deezer tracks available"
+				detail = str(_DEEZER_LAST_FETCH_ERR or "").strip()
+				if detail:
+					msg = "%s — %s" % (msg, detail[:220])
+				self.json_response({"error": msg}, 500)
+				return
+			self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_solo_guess_post(self):
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			sid = str(parsed.get("sessionId") or "").strip()
+			sess = self._solo_get_session(sid)
+			if not sess:
+				self.json_response({"error": "Nieprawidlowa lub wygasla sesja"}, 400)
+				return
+			if bool(sess.get("reveal_active")) or not bool(sess.get("round_active")):
+				self.json_response({"error": "Runda nieaktywna"}, 400)
+				return
+			if sess.get("guessed") or sess.get("wrong"):
+				self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			guess = str(parsed.get("guess", "")).strip()
+			if len(guess) < 3:
+				self.json_response({"error": "Za krotka odpowiedz"}, 400)
+				return
+			title = str(sess.get("title", "") or "")
+			artist = str(sess.get("artist", "") or "")
+			if self._guess_matches_deezer(guess, title, artist):
+				sess["artist_hint"] = False
+				idx = int(sess.get("listen_phase", 0))
+				if idx < 0:
+					idx = 0
+				if idx >= len(QUIZ_PHASE_POINTS):
+					idx = len(QUIZ_PHASE_POINTS) - 1
+				points = QUIZ_PHASE_POINTS[idx]
+				sess["total_score"] = int(sess.get("total_score", 0)) + int(points)
+				sess["guessed"] = True
+				sess.setdefault("guess_history", []).append({"text": guess, "kind": "correct"})
+				self._solo_begin_reveal(sess)
+				self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			if self._artist_only_matches_round(guess, title, artist):
+				sess.setdefault("guess_history", []).append({"text": guess, "kind": "artist_hint"})
+				sess["artist_hint"] = True
+				cur = int(sess.get("listen_phase", 0))
+				last_i = len(QUIZ_PHASE_DURATIONS) - 1
+				if cur < last_i:
+					sess["listen_phase"] = cur + 1
+				nidx = int(sess["listen_phase"])
+				sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+				sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+				sess["issued_ms"] = self._now_ms()
+				with SOLO_QUIZ_LOCK:
+					SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+				self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			sess["artist_hint"] = False
+			cur = int(sess.get("listen_phase", 0))
+			last_i = len(QUIZ_PHASE_DURATIONS) - 1
+			sess.setdefault("guess_history", []).append({"text": guess, "kind": "wrong"})
+			if cur < last_i:
+				sess["listen_phase"] = cur + 1
+				nidx = int(sess["listen_phase"])
+				sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+				sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+				sess["issued_ms"] = self._now_ms()
+				with SOLO_QUIZ_LOCK:
+					SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+				self.json_response({"ok": True, "guessWrong": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			sess["wrong"] = True
+			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+			self._solo_begin_reveal(sess)
+			self.json_response({"ok": True, "guessWrong": True, "state": self._public_solo_state(sess)}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_solo_skip_post(self):
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			sid = str(parsed.get("sessionId") or "").strip()
+			sess = self._solo_get_session(sid)
+			if not sess:
+				self.json_response({"error": "Nieprawidlowa lub wygasla sesja"}, 400)
+				return
+			if bool(sess.get("reveal_active")) or not bool(sess.get("round_active")):
+				self.json_response({"error": "Runda nieaktywna"}, 400)
+				return
+			if sess.get("guessed") or sess.get("wrong"):
+				self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			if int(sess.get("skips_used", 0)) >= QUIZ_MAX_SKIPS_PER_ROUND:
+				self.json_response({"error": "Wykorzystales juz max skipow (4) w tej rundzie"}, 400)
+				return
+			sess["skips_used"] = int(sess.get("skips_used", 0)) + 1
+			sess["artist_hint"] = False
+			sess.setdefault("guess_history", []).append({"text": "SKIP", "kind": "skip"})
+			cur = int(sess.get("listen_phase", 0))
+			last_i = len(QUIZ_PHASE_DURATIONS) - 1
+			if cur < last_i:
+				sess["listen_phase"] = cur + 1
+				nidx = int(sess["listen_phase"])
+				sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+				sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+				sess["issued_ms"] = self._now_ms()
+				with SOLO_QUIZ_LOCK:
+					SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+				self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
+				return
+			sess["wrong"] = True
+			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+			self._solo_begin_reveal(sess)
+			self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_solo_leaderboard_submit_post(self):
+		try:
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			sid = str(parsed.get("sessionId") or "").strip()
+			sess = self._solo_get_session(sid)
+			if not sess:
+				self.json_response({"error": "Nieprawidlowa lub wygasla sesja"}, 400)
+				return
+			score = int(sess.get("total_score", 0))
+			ip = self._client_ip()
+			if not ip:
+				self.json_response({"error": "Brak adresu IP"}, 400)
+				return
+			data = self._read_solo_leaderboard()
+			by_ip = data.setdefault("byIp", {})
+			prev = by_ip.get(ip, {})
+			if not isinstance(prev, dict):
+				prev = {}
+			best = int(prev.get("bestScore", 0))
+			new_best = max(best, score)
+			by_ip[ip] = {
+				"bestScore": new_best,
+				"lastScore": score,
+				"updatedMs": self._now_ms(),
+			}
+			self._write_solo_leaderboard(data)
+			self.json_response({"ok": True, "saved": True, "bestScore": new_best, "submittedScore": score}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
 
 	def do_GET(self):
 		parsed = urlparse(self.path)
@@ -901,6 +1375,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/deezer-polish-hiphop":
 			self.handle_deezer_polish_hiphop_get(parsed.query)
+			return
+		if parsed.path == "/api/quiz-solo/leaderboard":
+			self.handle_quiz_solo_leaderboard_get()
 			return
 		if parsed.path == "/api/avatar-presets":
 			self.handle_avatar_presets_get()
@@ -957,6 +1434,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if parsed.path == "/api/quiz-start-round":
 			self.handle_quiz_start_round_post()
 			return
+		if parsed.path == "/api/quiz-round-limit":
+			self.handle_quiz_round_limit_post()
+			return
 		if parsed.path == "/api/quiz-next-phase":
 			self.handle_quiz_next_phase_post()
 			return
@@ -965,6 +1445,21 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/quiz-skip-phase":
 			self.handle_quiz_skip_phase_post()
+			return
+		if parsed.path == "/api/quiz-solo/new-game":
+			self.handle_quiz_solo_new_post()
+			return
+		if parsed.path == "/api/quiz-solo/next-round":
+			self.handle_quiz_solo_next_round_post()
+			return
+		if parsed.path == "/api/quiz-solo/guess":
+			self.handle_quiz_solo_guess_post()
+			return
+		if parsed.path == "/api/quiz-solo/skip-phase":
+			self.handle_quiz_solo_skip_post()
+			return
+		if parsed.path == "/api/quiz-solo/leaderboard-submit":
+			self.handle_quiz_solo_leaderboard_submit_post()
 			return
 		self.json_response({"error": "Not found"}, 404)
 
@@ -1534,6 +2029,64 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return True
 		return False
 
+	def _deezer_raw_item_likely_polish(self, item):
+		# Najważniejsze: w podpowiedziach tylko polska scena — ISRC, polskie znaki, znani z puli lub z hints.
+		try:
+			isrc = str(item.get("isrc") or "").strip().upper()
+		except Exception:
+			isrc = ""
+		if isrc.startswith("PL"):
+			return True
+		title = str(item.get("title") or "")
+		artist_name = str((item.get("artist") or {}).get("name") or "")
+		alb = str((item.get("album") or {}).get("title") or "")
+		blob = title + " " + artist_name + " " + alb
+		if _POLISH_DIACRITICS_RE.search(blob):
+			return True
+		an = _fold_text_answer(artist_name)
+		ti = _fold_text_answer(title)
+		comb = an + " " + ti
+		for seed in POLISH_SCENE_ARTIST_SEEDS:
+			fs = _fold_text_answer(seed)
+			if len(fs) >= 3 and fs in an:
+				return True
+		for hint in SEARCH_POLISH_NAME_HINTS:
+			fh = _fold_text_answer(hint)
+			if len(fh) >= 5 and (fh in an or fh in ti or fh in comb):
+				return True
+		return False
+
+	def _deezer_search_rank_score(self, term, item):
+		# Najważniejsze: wyżej wyniki zgodne z tym, co wpisuje użytkownik (np. ten sam tytuł + rok w nazwie).
+		ft = _fold_text_answer(term)
+		if not ft:
+			return 0
+		title = _fold_text_answer(str(item.get("title") or ""))
+		art = _fold_text_answer(str((item.get("artist") or {}).get("name") or ""))
+		label = (title + " " + art).strip()
+		score = 0
+		if title.startswith(ft):
+			score += 8000
+		elif ft in title:
+			score += 5000
+		if ft in label:
+			score += 2500
+		prefix = ft[: min(len(ft), 14)]
+		if len(prefix) >= 4 and title.startswith(prefix):
+			score += 3500
+		if not re.search(r"\d{4}", term) and re.search(r"20[12][0-9]", str(item.get("title") or "")):
+			score += 400
+		try:
+			score += min(int(item.get("rank") or 0), 800000) // 2000
+		except Exception:
+			pass
+		return score
+
+	def _deezer_search_total_score(self, term, item):
+		# Najważniejsze: polska scena na górze listy, ale bez odrzucania reszty wyników Deezera.
+		boost = 400000 if self._deezer_raw_item_likely_polish(item) else 0
+		return boost + self._deezer_search_rank_score(term, item)
+
 	def _deezer_try_resolve_artist_id(self, term):
 		t = term.strip()
 		if not t or " - " in t:
@@ -1641,6 +2194,29 @@ class AppHandler(SimpleHTTPRequestHandler):
 				break
 		return out
 
+	def _deezer_search_push_unique_raw(self, item, seen_ids, bucket, max_total):
+		tid = str(item.get("id") or "").strip()
+		if not tid or tid in seen_ids:
+			return False
+		seen_ids.add(tid)
+		bucket.append(item)
+		return len(bucket) >= max_total
+
+	def _deezer_search_fetch_track_query_pages(self, q, seen_ids, bucket, max_total, indexes):
+		if len(bucket) >= max_total:
+			return
+		for index in indexes:
+			if len(bucket) >= max_total:
+				return
+			url = "https://api.deezer.com/search/track?" + urlencode({"q": q, "limit": 50, "index": int(index)})
+			try:
+				parsed = self._fetch_deezer_url_json(url)
+			except Exception:
+				continue
+			for item in parsed.get("data") or []:
+				if self._deezer_search_push_unique_raw(item, seen_ids, bucket, max_total):
+					return
+
 	def handle_deezer_search_get(self, query_text):
 		try:
 			parsed_query = parse_qs(query_text or "")
@@ -1648,16 +2224,50 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if not term:
 				self.json_response({"tracks": []}, 200)
 				return
-			limit = self._get_limit_from_query(query_text, 15)
-			# Najważniejsze: sam artysta (np. „sobel”) → tylko jego utwory i featy (contributors na Deezer).
-			artist_id = self._deezer_try_resolve_artist_id(term)
-			if artist_id is not None:
-				tracks = self._fetch_deezer_tracks_for_artist_id(artist_id, term, limit)
-				if tracks:
-					self.json_response({"tracks": tracks}, 200)
-					return
-			tracks = self._fetch_deezer_tracks(term, limit)
-			self.json_response({"tracks": tracks}, 200)
+			limit = self._get_limit_from_query(query_text, 18)
+			limit = min(max(int(limit), 5), 30)
+			seen_ids = set()
+			raw_bucket = []
+			max_raw = 100
+
+			# Najważniejsze: mało requestów do Deezera — druga strona i „polska” tylko gdy pierwsza strona jest uboga.
+			self._deezer_search_fetch_track_query_pages(term, seen_ids, raw_bucket, max_raw, (0,))
+			if len(raw_bucket) < 22:
+				self._deezer_search_fetch_track_query_pages(term, seen_ids, raw_bucket, max_raw, (25,))
+			if re.search(r"\d{4}", term) is None and len(raw_bucket) < 30:
+				self._deezer_search_fetch_track_query_pages(term + " polska", seen_ids, raw_bucket, max_raw, (0,))
+			if " - " in term:
+				parts = term.split(" - ", 1)
+				if len(parts) == 2:
+					left = parts[0].strip()
+					right = parts[1].strip()
+					if left and right and len(raw_bucket) < 35:
+						self._deezer_search_fetch_track_query_pages(right + " " + left, seen_ids, raw_bucket, max_raw, (0,))
+
+			if len(raw_bucket) < 15 and " - " not in term:
+				artist_id = self._deezer_try_resolve_artist_id(term)
+				if artist_id is not None:
+					try:
+						top_url = "https://api.deezer.com/artist/%d/top?limit=40" % int(artist_id)
+						top_parsed = self._fetch_deezer_url_json(top_url)
+						for item in top_parsed.get("data") or []:
+							self._deezer_search_push_unique_raw(item, seen_ids, raw_bucket, max_raw)
+					except Exception:
+						pass
+
+			try:
+				raw_bucket.sort(key=lambda it: self._deezer_search_total_score(term, it), reverse=True)
+			except Exception:
+				pass
+			out = []
+			for item in raw_bucket:
+				rec = self._deezer_track_to_suggest_dict(item)
+				if not rec:
+					continue
+				out.append(rec)
+				if len(out) >= limit:
+					break
+			self.json_response({"tracks": out}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
@@ -1814,12 +2424,47 @@ class AppHandler(SimpleHTTPRequestHandler):
 				return
 			# Najważniejsze: start reczny bez Gotowy; auto-start przy zapisie typu przez _maybe_auto_start_quiz_when_all_ready.
 			if not self._start_quiz_round_with_random_track():
+				if self._quiz_round_limit_reached():
+					self.json_response({"error": "Osiagnieto limit rund quizu (zwieksz limit lub zapisz ponownie)"}, 400)
+					return
 				msg = "No Deezer tracks available"
 				detail = str(_DEEZER_LAST_FETCH_ERR or "").strip()
 				if detail:
 					msg = "%s — %s" % (msg, detail[:220])
 				self.json_response({"error": msg}, 500)
 				return
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
+	def handle_quiz_round_limit_post(self):
+		# Najważniejsze: sobik ustawia ile utworów ma trwać sesja (0 = bez limitu); zapis zeruje licznik zagranych w tej sesji.
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_quiz_state()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can set quiz round limit"}, 403)
+				return
+			try:
+				n = int(parsed.get("roundLimit"))
+			except (TypeError, ValueError):
+				self.json_response({"error": "Invalid round limit"}, 400)
+				return
+			if n < 0:
+				n = 0
+			if n > 9999:
+				n = 9999
+			BUZZER_STATE["quiz_round_limit"] = n
+			BUZZER_STATE["quiz_rounds_played"] = 0
+			BUZZER_STATE["last_update_ms"] = self._now_ms()
 			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
@@ -1891,9 +2536,18 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
 				self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
 				return
+			su = BUZZER_STATE.get("quiz_skips_used")
+			if not isinstance(su, dict):
+				BUZZER_STATE["quiz_skips_used"] = {}
+				su = BUZZER_STATE["quiz_skips_used"]
+			prev_skip = int(su.get(key, 0))
+			if prev_skip >= QUIZ_MAX_SKIPS_PER_ROUND:
+				self.json_response({"error": "Wykorzystales juz max skipow (4) w tej rundzie"}, 400)
+				return
+			su[key] = prev_skip + 1
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
 			lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-			self._append_quiz_guess_history(key, "SKIP — kolejna faza sluchania", "skip")
+			self._append_quiz_guess_history(key, "SKIP", "skip")
 			if cur < last_i:
 				lp[key] = cur + 1
 				self._bump_quiz_listen_for_player(key)
@@ -1953,11 +2607,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			title = str(BUZZER_STATE.get("quiz_track_title", "") or "")
 			artist = str(BUZZER_STATE.get("quiz_track_artist", "") or "")
 			if self._guess_matches_deezer(guess, title, artist):
-				self._append_quiz_guess_history(key, guess, "correct")
 				BUZZER_STATE["quiz_artist_hint_players"][key] = False
 				points = self._quiz_points_for_player_key(key)
 				BUZZER_STATE["quiz_guessed_players"][key] = True
 				BUZZER_STATE["scores"][key] = int(BUZZER_STATE["scores"].get(key, 0)) + points
+				self._append_quiz_guess_history(key, guess, "correct")
 				BUZZER_STATE["last_update_ms"] = self._now_ms()
 				if self._all_occupied_finished_song():
 					self._begin_quiz_reveal()
@@ -2035,11 +2689,18 @@ def _quiz_auto_next_tick():
 			return
 		if not h._start_quiz_round_with_random_track():
 			BUZZER_STATE["last_update_ms"] = h._now_ms()
+			# Najważniejsze: bez kolejnego utworu zamykamy ujawnienie, żeby UI nie zostawało na starym ekranie.
+			BUZZER_STATE["quiz_reveal_active"] = False
+			BUZZER_STATE["quiz_reveal_seek_middle"] = False
+			BUZZER_STATE["quiz_phase_index"] = -1
 			try:
-				sys.stderr.write(
-					"quiz_auto_next: nie udalo sie wylosowac utworu (Deezer). Ostatni blad: %s\n"
-					% (str(_DEEZER_LAST_FETCH_ERR or "").strip()[:300],)
-				)
+				if h._quiz_round_limit_reached():
+					sys.stderr.write("quiz_auto_next: osiagnieto limit rund quizu\n")
+				else:
+					sys.stderr.write(
+						"quiz_auto_next: nie udalo sie wylosowac utworu (Deezer). Ostatni blad: %s\n"
+						% (str(_DEEZER_LAST_FETCH_ERR or "").strip()[:300],)
+					)
 			except Exception:
 				pass
 			return
@@ -2054,7 +2715,7 @@ def _quiz_auto_next_tick():
 def schedule_quiz_auto_next_after_reveal():
 	_cancel_quiz_auto_next_timer_thread()
 	BUZZER_STATE["quiz_reveal_pending_auto_next"] = True
-	delay = float(QUIZ_REVEAL_CLIP_SEC) + 1.25
+	delay = float(QUIZ_REVEAL_CLIP_SEC) + float(QUIZ_AFTER_REVEAL_NEXT_SEC)
 	t = threading.Timer(delay, _quiz_auto_next_tick)
 	t.daemon = True
 	global _QUIZ_AUTO_NEXT_TIMER
