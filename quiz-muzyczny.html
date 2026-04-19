@@ -512,7 +512,7 @@
 		.phase-answer-timer-wrap {
 			margin: 0 0 8px;
 			display: grid;
-			gap: 6px;
+			gap: 0;
 		}
 
 		.phase-answer-timer-wrap.hidden {
@@ -538,13 +538,6 @@
 			background: linear-gradient(90deg, #b45309, #f59e0b, #fbbf24);
 			transform-origin: left center;
 			transition: width 0.08s linear;
-		}
-
-		.phase-answer-timer-label {
-			font-size: 12px;
-			font-weight: 700;
-			letter-spacing: 0.03em;
-			color: #fbbf24;
 		}
 
 		.quiz-phase-badge {
@@ -1011,6 +1004,12 @@
 			animation: quiz-card-reveal-dolly 3.8s ease-in-out infinite;
 		}
 
+		/* Ujawnienie (multi): wylacz „dolly” — jeden spokojny obrot inner w czasie klipu */
+		.quiz-card-stage--revealed:has(.quiz-card-inner--reveal-flip) .quiz-card-float {
+			animation: none;
+			transform: rotateX(8deg) rotateY(-14deg) translateZ(0);
+		}
+
 		@keyframes quiz-card-3d-float {
 			0%, 100% {
 				transform: rotateX(8deg) rotateY(-14deg) translateZ(0);
@@ -1050,6 +1049,7 @@
 
 		.quiz-card-inner.quiz-card-inner--instant {
 			transition: none !important;
+			animation: none !important;
 			transform: rotateY(0deg) translateZ(6px) !important;
 		}
 
@@ -1062,7 +1062,27 @@
 			transform: rotateX(8deg) rotateY(-14deg) translateZ(0);
 		}
 
-		.quiz-card-stage--revealed .quiz-card-inner {
+		/* Faza ujawnienia: od tyłu (odpowiedz) do przodu (grafika) w czasie klipu — na koniec odpowiedz zaslonieta */
+		@keyframes quiz-card-reveal-cover {
+			0% {
+				transform: rotateY(180deg) translateZ(6px);
+				box-shadow:
+					0 28px 52px rgba(0, 0, 0, 0.55),
+					0 0 40px rgba(249, 115, 22, 0.24),
+					0 0 28px rgba(234, 179, 8, 0.16);
+			}
+			100% {
+				transform: rotateY(360deg) translateZ(6px);
+				box-shadow:
+					0 22px 44px rgba(0, 0, 0, 0.48);
+			}
+		}
+
+		.quiz-card-inner.quiz-card-inner--reveal-flip {
+			animation: quiz-card-reveal-cover var(--reveal-flip-ms, 6000ms) ease-in-out forwards;
+		}
+
+		.quiz-card-stage--revealed .quiz-card-inner:not(.quiz-card-inner--reveal-flip) {
 			transform: rotateY(180deg) translateZ(6px);
 			box-shadow:
 				0 28px 52px rgba(0, 0, 0, 0.55),
@@ -1369,7 +1389,10 @@
 			.quiz-card-inner {
 				transition: transform 0.2s ease;
 			}
-			.quiz-card-stage--revealed .quiz-card-inner {
+			.quiz-card-inner--reveal-flip {
+				animation-duration: 0.35s !important;
+			}
+			.quiz-card-stage--revealed .quiz-card-inner:not(.quiz-card-inner--reveal-flip) {
 				box-shadow: 0 24px 46px rgba(0, 0, 0, 0.52);
 			}
 			.quiz-card-stage--revealed .quiz-card-face--back {
@@ -1496,11 +1519,10 @@
 				</div>
 				<div class="quiz-card-guess-slot">
 					<p id="quizLimitBanner" class="quiz-phase-badge hidden" style="color:#fbbf24;" aria-live="polite"></p>
-					<div id="phaseAnswerTimerWrap" class="phase-answer-timer-wrap hidden" aria-live="polite">
+					<div id="phaseAnswerTimerWrap" class="phase-answer-timer-wrap hidden" aria-label="Auto SKIP" role="progressbar" aria-valuemin="0" aria-valuemax="100">
 						<div class="phase-answer-timer-track" aria-hidden="true">
 							<div id="phaseAnswerTimerFill" class="phase-answer-timer-fill"></div>
 						</div>
-						<span id="phaseAnswerTimerLabel" class="phase-answer-timer-label"></span>
 					</div>
 					<div class="guess-autocomplete-wrap">
 						<form id="guessForm" class="guess-form" action="#" method="post">
@@ -1555,8 +1577,8 @@
 		const MAX_PLAYERS = 8;
 		const AUTO_PHASE_DELAY_MS = 700;
 		const QUIZ_MAX_SKIPS = 4;
-		// Najważniejsze: QUIZ_CARD_FLIP_BACK_MS musi być zgodny z transition (220ms) na .quiz-card-inner i .quiz-card-stage w CSS; audio nowej rundy po QUIZ_CARD_NEW_CLIP_DELAY_MS.
-		const QUIZ_CARD_FLIP_BACK_MS = 220;
+		// Najważniejsze: QUIZ_CARD_FLIP_BACK_MS zgodny z transition na .quiz-card-inner (120ms); audio nowej rundy po QUIZ_CARD_NEW_CLIP_DELAY_MS.
+		const QUIZ_CARD_FLIP_BACK_MS = 120;
 		const QUIZ_CARD_NEW_CLIP_DELAY_MS = QUIZ_CARD_FLIP_BACK_MS + 40;
 		// Najważniejsze: czas na odpowiedź po zakończeniu klipu fazy — potem auto SKIP (jak przycisk), nie na ostatniej szansie.
 		const QUIZ_PHASE_ANSWER_MS = 10000;
@@ -1591,7 +1613,6 @@
 		const replayListenBtn = document.getElementById("replayListenBtn");
 		const phaseAnswerTimerWrap = document.getElementById("phaseAnswerTimerWrap");
 		const phaseAnswerTimerFill = document.getElementById("phaseAnswerTimerFill");
-		const phaseAnswerTimerLabel = document.getElementById("phaseAnswerTimerLabel");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
 		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
@@ -1638,11 +1659,13 @@
 		let localReplayGen = 0;
 		let quizEndOverlayDismissed = false;
 		let lastQuizRevealActiveForUi = false;
+		let lastRevealFlipAnimToken = -1;
 		let phaseAnswerDeadlineTimer = null;
 		let phaseAnswerUiInterval = null;
 		let phaseAnswerEndAtMs = 0;
 		let phaseAnswerSnapCmd = -1;
 		let phaseAnswerSnapLt = -1;
+		let phaseAnswerTotalMs = 0;
 		let quizClipLocalStartMs = 0; // Start biezacego klipu u klienta — auto-SKIP liczony od tego (poll dogania brak setTimeout).
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
@@ -2269,23 +2292,21 @@
 			if (phaseAnswerTimerFill) {
 				phaseAnswerTimerFill.style.width = "0%";
 			}
-			if (phaseAnswerTimerLabel) {
-				phaseAnswerTimerLabel.textContent = "";
-			}
 			phaseAnswerEndAtMs = 0;
+			phaseAnswerTotalMs = 0;
 		}
 
 		function tickPhaseAnswerTimerUi() {
-			if (!phaseAnswerEndAtMs || !phaseAnswerTimerLabel) {
+			if (!phaseAnswerEndAtMs || !phaseAnswerTimerFill) {
 				return;
 			}
 			const left = Math.max(0, phaseAnswerEndAtMs - Date.now());
-			const pct = Math.min(100, Math.max(0, (left / QUIZ_PHASE_ANSWER_MS) * 100));
-			if (phaseAnswerTimerFill) {
-				phaseAnswerTimerFill.style.width = pct + "%";
+			const denom = phaseAnswerTotalMs > 0 ? phaseAnswerTotalMs : QUIZ_PHASE_ANSWER_MS;
+			const pct = Math.min(100, Math.max(0, (left / denom) * 100));
+			phaseAnswerTimerFill.style.width = pct + "%";
+			if (phaseAnswerTimerWrap) {
+				phaseAnswerTimerWrap.setAttribute("aria-valuenow", String(Math.round(pct)));
 			}
-			const secLeft = Math.ceil(left / 1000);
-			phaseAnswerTimerLabel.textContent = "Auto SKIP za: " + String(secLeft) + " s";
 		}
 
 		function clearPhaseAnswerDeadline() {
@@ -2302,45 +2323,7 @@
 			phaseAnswerSnapLt = -1;
 		}
 
-		function maybeSchedulePhaseAnswerDeadline(stateSnap) {
-			clearPhaseAnswerDeadline();
-			if (!stateSnap || !myPlayer) {
-				return;
-			}
-			if (!Boolean(stateSnap.quizRoundActive) || Boolean(stateSnap.quizRevealActive)) {
-				return;
-			}
-			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-				return;
-			}
-			if (resolveListenOnLastChance(stateSnap, myPlayer)) {
-				return;
-			}
-			const skMap0 = stateSnap.quizSkipsUsed || {};
-			const su0 = Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0);
-			if (su0 >= QUIZ_MAX_SKIPS) {
-				return;
-			}
-			const durSec = resolveQuizListenDurationForMe(stateSnap);
-			if (quizClipLocalStartMs > 0 && durSec <= 0) {
-				return;
-			}
-			const clipEndMs =
-				quizClipLocalStartMs > 0 ? quizClipLocalStartMs + durSec * 1000 : Date.now();
-			const answerEndMs = clipEndMs + QUIZ_PHASE_ANSWER_MS;
-			const delayMs = Math.max(0, answerEndMs - Date.now());
-			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
-			phaseAnswerSnapLt = Number(
-				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
-					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
-					: 0
-			);
-			phaseAnswerEndAtMs = answerEndMs;
-			if (phaseAnswerTimerWrap) {
-				phaseAnswerTimerWrap.classList.remove("hidden");
-			}
-			tickPhaseAnswerTimerUi();
-			phaseAnswerUiInterval = window.setInterval(tickPhaseAnswerTimerUi, 100);
+		function schedulePhaseAnswerSkipTimeout(delayMs) {
 			phaseAnswerDeadlineTimer = setTimeout(function () {
 				phaseAnswerDeadlineTimer = null;
 				const st = currentState;
@@ -2378,6 +2361,81 @@
 			}, delayMs);
 		}
 
+		function beginPhaseAnswerWindow(stateSnap) {
+			clearPhaseAnswerDeadline();
+			if (!stateSnap || !myPlayer) {
+				return;
+			}
+			if (!Boolean(stateSnap.quizRoundActive) || Boolean(stateSnap.quizRevealActive)) {
+				return;
+			}
+			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
+				return;
+			}
+			if (resolveListenOnLastChance(stateSnap, myPlayer)) {
+				return;
+			}
+			const skMap0 = stateSnap.quizSkipsUsed || {};
+			const su0 = Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0);
+			if (su0 >= QUIZ_MAX_SKIPS) {
+				return;
+			}
+			const durSec = resolveQuizListenDurationForMe(stateSnap);
+			if (quizClipLocalStartMs <= 0 || durSec <= 0) {
+				return;
+			}
+			phaseAnswerTotalMs = durSec * 1000 + QUIZ_PHASE_ANSWER_MS;
+			phaseAnswerEndAtMs = quizClipLocalStartMs + phaseAnswerTotalMs;
+			const delayMs = Math.max(0, phaseAnswerEndAtMs - Date.now());
+			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
+			phaseAnswerSnapLt = Number(
+				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
+					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
+					: 0
+			);
+			if (phaseAnswerTimerWrap) {
+				phaseAnswerTimerWrap.classList.remove("hidden");
+			}
+			tickPhaseAnswerTimerUi();
+			phaseAnswerUiInterval = window.setInterval(tickPhaseAnswerTimerUi, 100);
+			schedulePhaseAnswerSkipTimeout(delayMs);
+		}
+
+		function scheduleAnswerOnlyAfterManualStop(stateSnap) {
+			clearPhaseAnswerDeadline();
+			if (!stateSnap || !myPlayer) {
+				return;
+			}
+			if (!Boolean(stateSnap.quizRoundActive) || Boolean(stateSnap.quizRevealActive)) {
+				return;
+			}
+			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
+				return;
+			}
+			if (resolveListenOnLastChance(stateSnap, myPlayer)) {
+				return;
+			}
+			const skMap0 = stateSnap.quizSkipsUsed || {};
+			const su0 = Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0);
+			if (su0 >= QUIZ_MAX_SKIPS) {
+				return;
+			}
+			phaseAnswerTotalMs = QUIZ_PHASE_ANSWER_MS;
+			phaseAnswerEndAtMs = Date.now() + QUIZ_PHASE_ANSWER_MS;
+			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
+			phaseAnswerSnapLt = Number(
+				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
+					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
+					: 0
+			);
+			if (phaseAnswerTimerWrap) {
+				phaseAnswerTimerWrap.classList.remove("hidden");
+			}
+			tickPhaseAnswerTimerUi();
+			phaseAnswerUiInterval = window.setInterval(tickPhaseAnswerTimerUi, 100);
+			schedulePhaseAnswerSkipTimeout(Math.max(0, phaseAnswerEndAtMs - Date.now()));
+		}
+
 		// Najwazniejsze: kazdy klient (poll) odtwarza auto-SKIP gdy timer po koncu klipu nie zadzialal (throttling, autoplay).
 		function ensurePhaseAnswerDeadlineFromLocalClip(state) {
 			if (!state || !myPlayer) {
@@ -2396,6 +2454,9 @@
 			if (Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0) >= QUIZ_MAX_SKIPS) {
 				return;
 			}
+			if (phaseAnswerDeadlineTimer) {
+				return;
+			}
 			if (quizClipLocalStartMs <= 0) {
 				return;
 			}
@@ -2409,14 +2470,26 @@
 			if (now < clipEndMs) {
 				return;
 			}
-			if (phaseAnswerDeadlineTimer) {
-				return;
-			}
 			if (now >= answerEndMs) {
 				skipPhase();
 				return;
 			}
-			maybeSchedulePhaseAnswerDeadline(state);
+			beginPhaseAnswerWindow(state);
+		}
+
+		function softStopClipPlayback() {
+			if (clipStopTimer) {
+				clearTimeout(clipStopTimer);
+				clipStopTimer = null;
+			}
+			if (quizProgressWrap) {
+				quizProgressWrap.classList.remove("quiz-progress-wrap--playing");
+			}
+			stopClipProgress();
+			quizAudio.pause();
+			try {
+				quizAudio.currentTime = 0;
+			} catch (eSeek) {}
 		}
 
 		function stopCurrentClip() {
@@ -2710,7 +2783,7 @@
 			}
 			localReplayGen = localReplayGen + 1;
 			const gen = localReplayGen;
-			stopCurrentClip();
+			softStopClipPlayback();
 			const curSrcReplay = quizAudio.currentSrc || quizAudio.src || "";
 			if (!quizAudioUrlsMatch(curSrcReplay, previewUrlReplay)) {
 				quizAudio.src = previewUrlReplay;
@@ -2739,12 +2812,12 @@
 				if (clipStopTimer) {
 					clearTimeout(clipStopTimer);
 				}
-				quizClipLocalStartMs = Date.now();
+				// Najwazniejsze: ponow nie resetuje terminu auto-SKIP — nowy start klipu tylko gdy okno SKIP jeszcze nie dziala.
+				if (!(phaseAnswerEndAtMs > Date.now())) {
+					quizClipLocalStartMs = Date.now();
+				}
 				clipStopTimer = setTimeout(function () {
-					stopCurrentClip();
-					if (!reveal) {
-						maybeSchedulePhaseAnswerDeadline(state);
-					}
+					softStopClipPlayback();
 				}, dur * 1000);
 			} catch (err0) {
 				setStatus("nie mozna odtworzyc ponownie");
@@ -2785,11 +2858,11 @@
 					startClipProgressRevealBar(0, durationSec);
 				}
 				quizClipLocalStartMs = Date.now();
+				if (!reveal) {
+					beginPhaseAnswerWindow(state);
+				}
 				clipStopTimer = setTimeout(function () {
-					stopCurrentClip();
-					if (!reveal) {
-						maybeSchedulePhaseAnswerDeadline(state);
-					}
+					softStopClipPlayback();
 				}, durationSec * 1000);
 			} catch (err) {
 				setStatus("nie mozna odtworzyc fragmentu (autoplay lub format)");
@@ -2877,6 +2950,7 @@
 				lastQuizCommandToken = 0;
 				lastQuizListenTokenMine = -1;
 				lastQuizRevealActiveForUi = false;
+				lastRevealFlipAnimToken = -1;
 			}
 			currentState = state;
 			currentScores = state.scores || {};
@@ -2940,9 +3014,24 @@
 					quizCardBackArtist.textContent = "";
 				}
 				quizCardStage.classList.add("quiz-card-stage--revealed");
+				const durRevealSec = resolveQuizListenDurationForMe(state);
+				const flipMs = Math.max(250, Math.round((Number(durRevealSec) > 0 ? Number(durRevealSec) : 2) * 1000));
+				const revealTok = Number(state.quizCommandToken || 0);
+				if (quizCardInner && revealTok !== lastRevealFlipAnimToken) {
+					lastRevealFlipAnimToken = revealTok;
+					quizCardInner.style.setProperty("--reveal-flip-ms", String(flipMs) + "ms");
+					quizCardInner.classList.remove("quiz-card-inner--reveal-flip");
+					void quizCardInner.offsetWidth;
+					quizCardInner.classList.add("quiz-card-inner--reveal-flip");
+				}
 			} else {
 				quizCardBackTitle.textContent = "";
 				quizCardBackArtist.textContent = "";
+				lastRevealFlipAnimToken = -1;
+				if (quizCardInner) {
+					quizCardInner.classList.remove("quiz-card-inner--reveal-flip");
+					quizCardInner.style.removeProperty("--reveal-flip-ms");
+				}
 				quizCardStage.classList.remove("quiz-card-stage--revealed");
 			}
 			if (instantRevealToRound) {
@@ -3242,7 +3331,7 @@
 				!isPlayerGuessed(myPlayer) &&
 				!isQuizWrong(myPlayer)
 			) {
-				maybeSchedulePhaseAnswerDeadline(currentState);
+				scheduleAnswerOnlyAfterManualStop(currentState);
 			}
 		});
 		volumeRange.addEventListener("input", () => {
