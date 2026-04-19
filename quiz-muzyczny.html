@@ -449,45 +449,58 @@
 			cursor: not-allowed;
 		}
 
-		.skip-phase-btn-wrap {
-			position: relative;
-			width: 100%;
-		}
-
-		.skip-phase-btn--fatal:not(:disabled) {
+		.skip-phase-btn--blocked-last:disabled {
+			opacity: 1;
 			background: #7f1d1d;
 			border-color: #dc2626;
 			color: #fecaca;
 		}
 
-		.skip-phase-btn--fatal:not(:disabled):hover {
-			background: #991b1b;
+		.skip-phase-btn-wrap {
+			position: relative;
+			width: 100%;
 		}
 
-		.skip-fatal-tooltip {
+		.skip-last-chance-bubble {
 			position: absolute;
 			right: calc(100% + 10px);
 			top: 50%;
 			transform: translateY(-50%);
-			z-index: 30;
-			max-width: 240px;
+			z-index: 35;
+			width: max-content;
+			max-width: 260px;
 			padding: 8px 10px;
 			font-size: 12px;
 			font-weight: 600;
 			line-height: 1.35;
-			color: #fecaca;
+			color: #fef2f2;
 			background: #450a0a;
-			border: 1px solid #b91c1c;
+			border: 1px solid #dc2626;
 			border-radius: 10px;
-			box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+			box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
 			pointer-events: none;
 			opacity: 0;
 			visibility: hidden;
-			transition: opacity 0.15s ease, visibility 0.15s ease;
+			transition: opacity 0.12s ease, visibility 0.12s ease;
 		}
 
-		.skip-phase-btn-wrap--fatal:hover .skip-fatal-tooltip,
-		.skip-phase-btn-wrap--fatal:focus-within .skip-fatal-tooltip {
+		.skip-last-chance-bubble::after {
+			content: "";
+			position: absolute;
+			left: 100%;
+			top: 50%;
+			margin-top: -6px;
+			border-width: 6px 0 6px 8px;
+			border-style: solid;
+			border-color: transparent transparent transparent #450a0a;
+		}
+
+		.skip-phase-btn-wrap--blocked {
+			cursor: help;
+		}
+
+		.skip-phase-btn-wrap--blocked:hover .skip-last-chance-bubble,
+		.skip-phase-btn-wrap--blocked:focus-within .skip-last-chance-bubble {
 			opacity: 1;
 			visibility: visible;
 		}
@@ -1371,9 +1384,9 @@
 			<div class="quiz-card-layout">
 				<div class="quiz-card-row">
 					<div class="quiz-card-side-actions" aria-label="Akcje karty">
-						<div class="skip-phase-btn-wrap" id="skipPhaseBtnWrap">
-							<span id="skipFatalTooltip" class="skip-fatal-tooltip" role="tooltip">
-								Ten SKIP odpala odpad z rundy — klikniecie to przegrana.
+						<div class="skip-phase-btn-wrap" id="skipPhaseHoverWrap">
+							<span id="skipLastChanceBubble" class="skip-last-chance-bubble" role="tooltip">
+								Ostatnia szansa: SKIP wylaczony. Musisz zgadnac — inaczej odpadasz przy zlym strzale.
 							</span>
 							<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>
 								SKIP
@@ -1510,7 +1523,7 @@
 		const guessForm = document.getElementById("guessForm");
 		const guessInput = document.getElementById("guessInput");
 		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
-		const skipPhaseBtnWrap = document.getElementById("skipPhaseBtnWrap");
+		const skipPhaseHoverWrap = document.getElementById("skipPhaseHoverWrap");
 		const replayListenBtn = document.getElementById("replayListenBtn");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
@@ -2185,7 +2198,20 @@
 			}
 			stopClipProgress();
 			quizAudio.pause();
-			try { quizAudio.currentTime = 0; } catch (err) { return; }
+			try {
+				quizAudio.currentTime = 0;
+			} catch (eSeek) {}
+		}
+
+		function resetQuizAudioElement() {
+			// Najważniejsze: po długiej grze element audio bywa w stanie błędu — czyszczenie src + load() przed ponownym ustawieniem URL.
+			try {
+				quizAudio.pause();
+			} catch (eP) {}
+			try {
+				quizAudio.removeAttribute("src");
+				quizAudio.load();
+			} catch (eL) {}
 		}
 
 		function normalizedAudioUrl(u) {
@@ -2226,6 +2252,54 @@
 				}
 				quizAudio.addEventListener("canplay", onOk, { once: true });
 				quizAudio.addEventListener("error", onBad, { once: true });
+			});
+		}
+
+		function waitQuizAudioReadyAfterLoad() {
+			// Najważniejsze: po load() czekamy na zdarzenia (bez skrótu readyState — po kilku minutach bywa nieaktualny); timeout żeby nigdy nie zawiesić UI.
+			return new Promise(function (resolve, reject) {
+				let settled = false;
+				const timeoutMs = 16000;
+				const timer = window.setTimeout(function () {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					cleanup();
+					reject(new Error("timeout audio"));
+				}, timeoutMs);
+				function ok() {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					window.clearTimeout(timer);
+					cleanup();
+					resolve();
+				}
+				function bad() {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					window.clearTimeout(timer);
+					cleanup();
+					reject(new Error("brak audio"));
+				}
+				function cleanup() {
+					try {
+						quizAudio.removeEventListener("loadeddata", ok);
+					} catch (e0) {}
+					try {
+						quizAudio.removeEventListener("canplay", ok);
+					} catch (e1) {}
+					try {
+						quizAudio.removeEventListener("error", bad);
+					} catch (e2) {}
+				}
+				quizAudio.addEventListener("loadeddata", ok, { once: true });
+				quizAudio.addEventListener("canplay", ok, { once: true });
+				quizAudio.addEventListener("error", bad, { once: true });
 			});
 		}
 
@@ -2293,40 +2367,73 @@
 			});
 		}
 
-		function seekQuizAudioToStart() {
-			// Najważniejsze: fazy zgadywania — zawsze od początku pliku preview (intro/bit), nie od środka.
-			return new Promise(function (resolve) {
-				let settled = false;
-				function fin() {
-					if (settled) {
-						return;
-					}
-					settled = true;
-					try {
-						quizAudio.removeEventListener("seeked", fin);
-					} catch (e0) {}
-					resolve();
-				}
-				try {
-					quizAudio.pause();
-				} catch (e1) {}
+		async function seekQuizAudioToStart() {
+			// Najwazniejsze: wielokrotny seek do 0 — niektore przegladarki zostawiaja srodek pliku po load().
+			try {
+				quizAudio.pause();
+			} catch (e0) {}
+			for (let k = 0; k < 6; k++) {
 				try {
 					if (typeof quizAudio.fastSeek === "function") {
 						try {
 							quizAudio.fastSeek(0);
-						} catch (e2) {
+						} catch (e1) {
 							quizAudio.currentTime = 0;
 						}
 					} else {
 						quizAudio.currentTime = 0;
 					}
-				} catch (e3) {
-					fin();
-					return;
+				} catch (e2) {}
+				await new Promise(function (resolve) {
+					let done = false;
+					function fin() {
+						if (done) {
+							return;
+						}
+						done = true;
+						try {
+							quizAudio.removeEventListener("seeked", fin);
+						} catch (e3) {}
+						resolve();
+					}
+					quizAudio.addEventListener("seeked", fin, { once: true });
+					window.setTimeout(fin, 100);
+				});
+				const t = Number(quizAudio.currentTime) || 0;
+				if (t < 0.2) {
+					break;
 				}
-				quizAudio.addEventListener("seeked", fin, { once: true });
-				window.setTimeout(fin, 120);
-			});
+			}
+		}
+
+		async function prepareQuizAudioPlaybackFromStart(previewUrlOpt) {
+			// Najważniejsze: load() + bufor + seek 0; przy błędzie sieci — reset elementu i ponowienie (2–3×), żeby sesja nie „umierała”.
+			const url = String(previewUrlOpt || "").trim();
+			const maxAttempts = 3;
+			for (let attempt = 0; attempt < maxAttempts; attempt++) {
+				if (attempt > 0 && url) {
+					await new Promise(function (resolve) {
+						window.setTimeout(resolve, 200 + attempt * 200);
+					});
+					resetQuizAudioElement();
+					try {
+						quizAudio.src = url;
+					} catch (eSrc) {}
+				}
+				try {
+					quizAudio.load();
+				} catch (e0) {
+					continue;
+				}
+				try {
+					await waitQuizAudioReadyAfterLoad();
+				} catch (e1) {
+					continue;
+				}
+				await seekQuizAudioToStart();
+				return true;
+			}
+			return false;
 		}
 
 		function resolveQuizListenDurationForMe(state) {
@@ -2364,53 +2471,38 @@
 			if (dur <= 0) {
 				return;
 			}
+			const previewUrlReplay = String(state.quizPreviewUrl || "").trim();
+			if (!previewUrlReplay) {
+				return;
+			}
 			localReplayGen = localReplayGen + 1;
 			const gen = localReplayGen;
+			stopCurrentClip();
+			const curSrcReplay = quizAudio.currentSrc || quizAudio.src || "";
+			if (!quizAudioUrlsMatch(curSrcReplay, previewUrlReplay)) {
+				quizAudio.src = previewUrlReplay;
+			}
 			applyVolume();
 			try {
-				const reveal = Boolean(state.quizRevealActive);
-				const seekMiddle = Boolean(state.quizRevealSeekMiddle);
-				if (!reveal) {
-					try {
-						quizAudio.load();
-					} catch (e0) {}
-					try {
-						await waitQuizAudioCanPlay();
-					} catch (e1) {
-						setStatus("nie mozna odtworzyc ponownie");
-						return;
-					}
-					await seekQuizAudioToStart();
-					try {
-						if ((Number(quizAudio.currentTime) || 0) > 0.12) {
-							quizAudio.currentTime = 0;
-						}
-					} catch (e2) {}
-				} else {
-					let windowStartSec = 0;
-					if (seekMiddle) {
-						windowStartSec = await seekQuizAudioToPreviewMiddle(dur);
-					} else {
-						await seekQuizAudioToStart();
-					}
-					if (gen !== localReplayGen) {
-						return;
-					}
-					await quizAudio.play();
-					startClipProgressRevealBar(windowStartSec, dur);
-					if (clipStopTimer) {
-						clearTimeout(clipStopTimer);
-					}
-					clipStopTimer = setTimeout(function () {
-						stopCurrentClip();
-					}, dur * 1000);
+				if (!(await prepareQuizAudioPlaybackFromStart(previewUrlReplay))) {
+					setStatus("nie mozna odtworzyc ponownie");
 					return;
 				}
 				if (gen !== localReplayGen) {
 					return;
 				}
-				await quizAudio.play();
-				startClipProgressGuess(state, dur);
+				try {
+					quizAudio.pause();
+					quizAudio.currentTime = 0;
+				} catch (eClampR) {}
+				const reveal = Boolean(state.quizRevealActive);
+				if (!reveal) {
+					await quizAudio.play();
+					startClipProgressGuess(state, dur);
+				} else {
+					await quizAudio.play();
+					startClipProgressRevealBar(0, dur);
+				}
 				if (clipStopTimer) {
 					clearTimeout(clipStopTimer);
 				}
@@ -2438,53 +2530,22 @@
 			if (srcChanged) {
 				quizAudio.src = previewUrl;
 			}
-			const seekMiddle = Boolean(state.quizRevealSeekMiddle);
 			applyVolume();
 			try {
+				if (!(await prepareQuizAudioPlaybackFromStart(previewUrl))) {
+					setStatus("blad ladowania audio");
+					return;
+				}
+				try {
+					quizAudio.pause();
+					quizAudio.currentTime = 0;
+				} catch (eClampP) {}
 				if (!reveal) {
-					try {
-						quizAudio.load();
-					} catch (errLoad) {
-						return;
-					}
-					try {
-						await waitQuizAudioCanPlay();
-					} catch (errWait) {
-						const msg = errWait && errWait.message ? String(errWait.message) : "blad ladowania audio";
-						setStatus(msg);
-						return;
-					}
-					await seekQuizAudioToStart();
-					try {
-						if ((Number(quizAudio.currentTime) || 0) > 0.12) {
-							quizAudio.currentTime = 0;
-						}
-					} catch (errT) {}
 					await quizAudio.play();
 					startClipProgressGuess(state, durationSec);
 				} else {
-					if (srcChanged) {
-						try {
-							quizAudio.load();
-						} catch (errL2) {
-							return;
-						}
-						try {
-							await waitQuizAudioCanPlay();
-						} catch (errW2) {
-							const msg = errW2 && errW2.message ? String(errW2.message) : "blad ladowania audio";
-							setStatus(msg);
-							return;
-						}
-					}
-					let windowStartSec = 0;
-					if (seekMiddle) {
-						windowStartSec = await seekQuizAudioToPreviewMiddle(durationSec);
-					} else {
-						await seekQuizAudioToStart();
-					}
 					await quizAudio.play();
-					startClipProgressRevealBar(windowStartSec, durationSec);
+					startClipProgressRevealBar(0, durationSec);
 				}
 				clipStopTimer = setTimeout(() => {
 					stopCurrentClip();
@@ -2541,24 +2602,28 @@
 			}, delay);
 		}
 
-		function applySkipFatalUi(state, skipDisabled) {
+		function resolveListenOnLastChance(state, playerKey) {
 			const fb = [0.5, 2, 4, 6];
 			const durs = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : fb;
 			const lastI = Math.max(0, durs.length - 1);
 			const lpMap = state.quizListenPhases || {};
-			let cur = Number(lpMap[String(myPlayer)]);
+			let cur = Number(lpMap[String(playerKey)]);
 			if (!Number.isFinite(cur)) {
 				cur = 0;
 			}
 			cur = Math.max(0, Math.min(Math.floor(cur), lastI));
-			// Najwazniejsze: na ostatniej fazie kolejny SKIP = odpad (serwer: cur < last_i tylko podbija faze).
-			const showFatal = !skipDisabled && cur >= lastI;
-			skipPhaseBtn.classList.toggle("skip-phase-btn--fatal", showFatal);
-			if (skipPhaseBtnWrap) {
-				skipPhaseBtnWrap.classList.toggle("skip-phase-btn-wrap--fatal", showFatal);
+			return cur >= lastI;
+		}
+
+		function applySkipLastChanceHint(onLastChance, roundOn, revealOn, myWrong, guessed) {
+			// Najwazniejsze: czerwony SKIP i dymek przy hoverze — ostatnia faza, serwer tez blokuje skip.
+			const showMsg = Boolean(onLastChance && roundOn && !revealOn && !myWrong && !guessed);
+			skipPhaseBtn.classList.toggle("skip-phase-btn--blocked-last", showMsg);
+			if (skipPhaseHoverWrap) {
+				skipPhaseHoverWrap.classList.toggle("skip-phase-btn-wrap--blocked", showMsg);
 			}
-			if (showFatal) {
-				skipPhaseBtn.setAttribute("aria-describedby", "skipFatalTooltip");
+			if (showMsg) {
+				skipPhaseBtn.setAttribute("aria-describedby", "skipLastChanceBubble");
 			} else {
 				skipPhaseBtn.removeAttribute("aria-describedby");
 			}
@@ -2645,9 +2710,10 @@
 			}
 			const skipsMapEarly = state.quizSkipsUsed || {};
 			const skipsUsedEarly = Number(skipsMapEarly[String(myPlayer)] != null ? skipsMapEarly[String(myPlayer)] : 0);
+			const onLastChance = resolveListenOnLastChance(state, myPlayer);
 			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
-			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS;
-			applySkipFatalUi(state, skipPhaseBtn.disabled);
+			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS || onLastChance;
+			applySkipLastChanceHint(onLastChance, roundOn, revealOn, myWrong, isPlayerGuessed(myPlayer));
 			replayListenBtn.disabled = !roundOn || revealOn || isPlayerGuessed(myPlayer) || myWrong;
 			if (myWrong && roundOn) {
 				wrongGuessPanel.classList.remove("hidden");

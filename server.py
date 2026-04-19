@@ -1072,10 +1072,15 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if random_track is None:
 			return False
 		BUZZER_STATE["quiz_track_id"] = str(random_track.get("id", "")).strip()
-		BUZZER_STATE["quiz_preview_url"] = str(random_track.get("previewUrl", "")).strip()
 		BUZZER_STATE["quiz_track_label"] = str(random_track.get("label", "")).strip()[:120]
 		BUZZER_STATE["quiz_track_title"] = str(random_track.get("title", "") or "").strip()[:120]
 		BUZZER_STATE["quiz_track_artist"] = str(random_track.get("artist", "") or "").strip()[:120]
+		deezer_preview = str(random_track.get("previewUrl", "")).strip()
+		it_preview = self._itunes_preview_url_for_title_artist(
+			BUZZER_STATE["quiz_track_title"],
+			BUZZER_STATE["quiz_track_artist"],
+		)
+		BUZZER_STATE["quiz_preview_url"] = it_preview if it_preview else deezer_preview
 		BUZZER_STATE["quiz_reveal_active"] = False
 		BUZZER_STATE["quiz_reveal_seek_middle"] = False
 		self._start_quiz_round()
@@ -1270,10 +1275,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 	def _solo_start_round_with_track(self, sess, tr):
 		sess["track_id"] = str(tr.get("id", "")).strip()
-		sess["preview_url"] = str(tr.get("previewUrl", "")).strip()
 		sess["label"] = str(tr.get("label", "")).strip()[:120]
 		sess["title"] = str(tr.get("title", "") or "").strip()[:120]
 		sess["artist"] = str(tr.get("artist", "") or "").strip()[:120]
+		deezer_preview = str(tr.get("previewUrl", "")).strip()
+		it_preview = self._itunes_preview_url_for_title_artist(sess.get("title"), sess.get("artist"))
+		sess["preview_url"] = it_preview if it_preview else deezer_preview
 		sess["round_active"] = True
 		sess["reveal_active"] = False
 		sess["reveal_seek_middle"] = False
@@ -1579,23 +1586,29 @@ class AppHandler(SimpleHTTPRequestHandler):
 			if int(sess.get("skips_used", 0)) >= QUIZ_MAX_SKIPS_PER_ROUND:
 				self.json_response({"error": "Wykorzystales juz max skipow (4) w tej rundzie"}, 400)
 				return
+			cur = int(sess.get("listen_phase", 0))
+			last_i = len(QUIZ_PHASE_DURATIONS) - 1
+			if cur < 0:
+				cur = 0
+			if cur > last_i:
+				cur = last_i
+			# Najważniejsze: na ostatniej fazie SKIP zablokowany — trzeba zgadnąć (spójnie z trybem wieloosobowym).
+			if cur >= last_i:
+				self.json_response(
+					{"error": "Na ostatniej szansie nie mozna uzyc SKIP — trzeba zgadnac."},
+					400,
+				)
+				return
 			sess["skips_used"] = int(sess.get("skips_used", 0)) + 1
 			sess["artist_hint"] = False
 			sess.setdefault("guess_history", []).append({"text": "SKIP", "kind": "skip"})
-			cur = int(sess.get("listen_phase", 0))
-			last_i = len(QUIZ_PHASE_DURATIONS) - 1
-			if cur < last_i:
-				sess["listen_phase"] = cur + 1
-				nidx = int(sess["listen_phase"])
-				sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
-				sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
-				sess["issued_ms"] = self._now_ms()
-				with SOLO_QUIZ_LOCK:
-					SOLO_QUIZ_SESSIONS[sess["token"]] = sess
-				self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
-				return
-			sess["wrong"] = True
-			self._solo_begin_reveal(sess)
+			sess["listen_phase"] = cur + 1
+			nidx = int(sess["listen_phase"])
+			sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+			sess["issued_ms"] = self._now_ms()
+			with SOLO_QUIZ_LOCK:
+				SOLO_QUIZ_SESSIONS[sess["token"]] = sess
 			self.json_response({"ok": True, "skippedPhase": True, "state": self._public_solo_state(sess)}, 200)
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
@@ -2130,6 +2143,100 @@ class AppHandler(SimpleHTTPRequestHandler):
 					extra = ""
 			_DEEZER_LAST_FETCH_ERR = ("%s %s" % (str(ex), extra)).strip()[:300]
 			return {}
+
+	def _fetch_itunes_url_json(self, url):
+		# Najważniejsze: iTunes Search API — previewUrl to zwykle początek utworu (Deezer preview często wycinek ze środka).
+		ctx = _deezer_ssl_context()
+		req = Request(
+			url,
+			headers={
+				"User-Agent": DEEZER_HTTP_UA,
+				"Accept": "application/json",
+			},
+		)
+		try:
+			with urlopen(req, timeout=18, context=ctx) as response:
+				raw = response.read().decode("utf-8", errors="replace")
+			parsed = json.loads(raw)
+			return parsed if isinstance(parsed, dict) else {}
+		except (HTTPError, URLError, OSError, TimeoutError, ValueError):
+			return {}
+
+	def _itunes_pick_best_preview(self, parsed, want_title, want_artist):
+		# Najważniejsze: wybór wyniku iTunes zgodnego z tytułem/artystą z Deezera (unikamy pomyłki utworu).
+		if not isinstance(parsed, dict):
+			return ""
+		results = parsed.get("results")
+		if not isinstance(results, list) or not results:
+			return ""
+		ft = _fold_text_answer(want_title)
+		fa = _fold_text_answer(want_artist)
+		if len(ft) < 2 or len(fa) < 2:
+			return ""
+		best_url = ""
+		best_score = -1
+		for r in results:
+			if not isinstance(r, dict):
+				continue
+			purl = str(r.get("previewUrl") or "").strip()
+			if not purl.startswith("http"):
+				continue
+			rn = _fold_text_answer(str(r.get("trackName") or ""))
+			ran = _fold_text_answer(str(r.get("artistName") or ""))
+			score = 0
+			if fa and ran:
+				if fa == ran:
+					score += 45
+				elif fa in ran or ran in fa:
+					score += 36
+				else:
+					faw = [w for w in fa.split() if len(w) > 2]
+					hits_a = sum(1 for w in faw if w in ran)
+					if faw and hits_a >= min(2, len(faw)):
+						score += max(22, hits_a * 10)
+					elif faw and hits_a == 1:
+						score += 12
+			if ft and rn:
+				if ft == rn:
+					score += 45
+				elif ft in rn or rn in ft:
+					score += 36
+				else:
+					ftw = [w for w in ft.split() if len(w) > 2]
+					hits_t = sum(1 for w in ftw if w in rn)
+					if ftw and hits_t >= min(2, len(ftw)):
+						score += max(20, hits_t * 9)
+					elif ftw and hits_t == 1:
+						score += 10
+			if score > best_score:
+				best_score = score
+				best_url = purl
+		if best_score >= 55 and best_url:
+			return best_url
+		return ""
+
+	def _itunes_preview_url_for_title_artist(self, title, artist):
+		# Najważniejsze: gdy iTunes ma ten sam utwór, używamy preview od początku; gdy brak pewnego dopasowania — Deezer.
+		t = str(_strip_title_feat(str(title or ""))).strip()
+		a = str(artist or "").strip()
+		if len(t) < 2 or len(a) < 2:
+			return ""
+		term = (t + " " + a)[:200]
+		for country in ("pl", "us"):
+			url = "https://itunes.apple.com/search?" + urlencode(
+				{
+					"term": term,
+					"media": "music",
+					"entity": "song",
+					"limit": 15,
+					"country": country,
+				}
+			)
+			parsed = self._fetch_itunes_url_json(url)
+			got = self._itunes_pick_best_preview(parsed, t, a)
+			if got:
+				return got
+		return ""
 
 	def _parse_year_from_date_str(self, raw):
 		st = str(raw or "").strip()
@@ -3009,6 +3116,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 				if bool(BUZZER_STATE["quiz_wrong_players"].get(key)):
 					self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
 					return
+				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
+				# Najważniejsze: na ostatniej fazie słuchania SKIP jest zablokowany — gracz musi zgadnąć (bez odpadu przez SKIP).
+				if cur >= last_i:
+					self.json_response(
+						{"error": "Na ostatniej szansie nie mozna uzyc SKIP — trzeba zgadnac."},
+						400,
+					)
+					return
 				su = BUZZER_STATE.get("quiz_skips_used")
 				if not isinstance(su, dict):
 					BUZZER_STATE["quiz_skips_used"] = {}
@@ -3019,23 +3134,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 					return
 				su[key] = prev_skip + 1
 				BUZZER_STATE["quiz_artist_hint_players"][key] = False
-				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
 				self._append_quiz_guess_history(key, "SKIP", "skip")
-				if cur < last_i:
-					lp[key] = cur + 1
-					self._bump_quiz_listen_for_player(key)
-					if self._all_occupied_finished_song():
-						self._begin_quiz_reveal()
-					self.json_response({"ok": True, "skippedPhase": True, "state": self._public_buzzer_state()}, 200)
-					return
-				BUZZER_STATE["quiz_wrong_players"][key] = True
-				prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
-				if not isinstance(prev, list):
-					prev = []
-					BUZZER_STATE["quiz_wrong_guesses"][key] = prev
-				prev.append("SKIP (ostatnia faza)")
-				# Najważniejsze: bez podbicia quiz_command_token — inaczej wszyscy słyszą klip od nowa po ostatnim skipie.
-				self._refresh_quiz_listen_duration_no_token()
+				lp[key] = cur + 1
+				self._bump_quiz_listen_for_player(key)
 				if self._all_occupied_finished_song():
 					self._begin_quiz_reveal()
 				self.json_response({"ok": True, "skippedPhase": True, "state": self._public_buzzer_state()}, 200)
