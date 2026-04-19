@@ -152,6 +152,10 @@ QUIZ_POOL_WHITELIST_ARTISTS = (
 	"Guzior",
 	"Dajczman",
 )
+# Najważniejsze: w Deezer jest wielu artystów „Mata” (np. inna scena językowa) — token „mata” łapał wszystkich; tu tylko polska Mata (PL ISRC / znany id).
+QUIZ_MATA_POLISH_DEEZER_ARTIST_IDS = frozenset({353802652})
+# Najważniejsze: znane złe profile „Mata” (np. Deezer 101507162 — „Dans la ville”; 378102 — rozjechane top / nie ta osoba).
+QUIZ_MATA_FAKE_DEEZER_ARTIST_IDS = frozenset({101507162, 378102})
 QUIZ_MODERN_POOL_ARTIST_SEEDS = QUIZ_POOL_WHITELIST_ARTISTS
 POLISH_SCENE_ARTIST_SEEDS = (
 	"Sanah",
@@ -212,6 +216,7 @@ QUIZ_PHASE_DURATIONS = (
 	[0.4, 0.95, 1.5, 2.4] if QUIZ_TIME_PRESSURE_TEST else [0.5, 2, 4, 6]
 )
 QUIZ_PHASE_POINTS = [4, 3, 2, 1]
+QUIZ_ARTIST_ONLY_POINTS = 1
 QUIZ_REVEAL_CLIP_SEC = 10
 QUIZ_AFTER_REVEAL_NEXT_SEC = 1.0
 QUIZ_MAX_SKIPS_PER_ROUND = 4
@@ -221,8 +226,9 @@ QUIZ_POOL_BUILD_MAX_DEEZER_HTTP = 14
 QUIZ_POOL_POPULAR_LEADING_MAX_HTTP = 6
 # Najważniejsze: żeby jeden artysta (np. z jednego wyniku search) nie zajmował całej puli.
 QUIZ_POOL_MAX_TRACKS_PER_ARTIST = 4
-# Najważniejsze: po złożeniu puli zostaje tylko N utworów z najwyższym rank Deezera (nie „lista Billboard”, tylko przecięcie naszej puli).
-QUIZ_POOL_TOP_BY_RANK_COUNT = 30
+# Najważniejsze: po złożeniu puli losujemy podzbiór z szerszego „wide” po ranku — mniej powtórek tej samej trzydziestki.
+QUIZ_POOL_TOP_BY_RANK_COUNT = 48
+QUIZ_POOL_RANK_WIDE_FACTOR = 4
 QUIZ_POLISH_POPULAR_LEADING_TERMS = (
 	"polski rap",
 	"polski hip hop",
@@ -322,6 +328,7 @@ BUZZER_STATE = {
 	"quiz_listen_token": {},
 	"quiz_guessed_players": {},
 	"quiz_artist_hint_players": {},
+	"quiz_artist_only_scored": {},
 	"quiz_wrong_players": {},
 	"quiz_wrong_guesses": {},
 	"quiz_guess_history": {},
@@ -532,6 +539,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			# Najważniejsze: po resecie kolejna runda wymaga ponownego Gotowy (unikamy podwójnego autostartu).
 			BUZZER_STATE["quiz_ready_players"][str(i)] = False
 			BUZZER_STATE["quiz_artist_hint_players"][str(i)] = False
+			oas = BUZZER_STATE.get("quiz_artist_only_scored")
+			if not isinstance(oas, dict):
+				BUZZER_STATE["quiz_artist_only_scored"] = {}
+				oas = BUZZER_STATE["quiz_artist_only_scored"]
+			oas[str(i)] = False
 			BUZZER_STATE["quiz_guessed_players"][str(i)] = False
 			BUZZER_STATE["quiz_wrong_players"][str(i)] = False
 			BUZZER_STATE["quiz_wrong_guesses"][str(i)] = []
@@ -674,6 +686,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 			key = str(i)
 			if key not in hint:
 				hint[key] = False
+		oas = BUZZER_STATE.get("quiz_artist_only_scored")
+		if not isinstance(oas, dict):
+			BUZZER_STATE["quiz_artist_only_scored"] = {}
+			oas = BUZZER_STATE["quiz_artist_only_scored"]
+		for i in range(1, MAX_PLAYERS + 1):
+			key = str(i)
+			if key not in oas:
+				oas[key] = False
 		# Najważniejsze: jedna kategoria serwera — wylacznie polska muzyka (nadpisuje stare zapisy stanu).
 		BUZZER_STATE["quiz_music_query"] = QUIZ_MUSIC_FIXED_POLISH
 		if "quiz_reveal_active" not in BUZZER_STATE:
@@ -952,9 +972,16 @@ class AppHandler(SimpleHTTPRequestHandler):
 		if tracks:
 			# Najważniejsze: ucinamy dominację jednego artysty z jednego zapytania Deezera.
 			tracks = self._quiz_pool_limit_per_artist(tracks, int(QUIZ_POOL_MAX_TRACKS_PER_ARTIST))
-			# Najważniejsze: sort po rank Deezera — tylko top N do cache (losowanie dalej z tej listy).
+			# Najważniejsze: sort po rank Deezera — szeroki wide, potem shuffle i węższy cache (inna kolejność co budowa puli).
 			tracks.sort(key=lambda t: int(t.get("rank") or 0), reverse=True)
 			topn = max(1, int(QUIZ_POOL_TOP_BY_RANK_COUNT))
+			try:
+				wf = max(2, int(QUIZ_POOL_RANK_WIDE_FACTOR))
+			except Exception:
+				wf = 4
+			wide = min(len(tracks), topn * wf)
+			tracks = tracks[:wide]
+			random.shuffle(tracks)
 			tracks = tracks[:topn]
 			_QUIZ_TRACK_POOL_CACHE = tracks
 			_QUIZ_TRACK_POOL_CACHE_MS = self._now_ms()
@@ -1053,6 +1080,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			key = str(i)
 			BUZZER_STATE["quiz_guessed_players"][key] = False
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			oas = BUZZER_STATE.get("quiz_artist_only_scored")
+			if not isinstance(oas, dict):
+				BUZZER_STATE["quiz_artist_only_scored"] = {}
+				oas = BUZZER_STATE["quiz_artist_only_scored"]
+			oas[key] = False
 			BUZZER_STATE["quiz_wrong_players"][key] = False
 			BUZZER_STATE["quiz_wrong_guesses"][key] = []
 			BUZZER_STATE["quiz_guess_history"][key] = []
@@ -1292,6 +1324,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 		sess["guessed"] = False
 		sess["wrong"] = False
 		sess["artist_hint"] = False
+		sess["artist_only_scored"] = False
 		sess["skips_used"] = 0
 		sess["guess_history"] = []
 		sess["command_token"] = int(sess.get("command_token", 0)) + 1
@@ -1529,29 +1562,36 @@ class AppHandler(SimpleHTTPRequestHandler):
 				self.json_response({"ok": True, "state": self._public_solo_state(sess)}, 200)
 				return
 			if self._artist_only_matches_round(guess, title, artist):
-				sess.setdefault("guess_history", []).append({"text": guess, "kind": "artist_hint"})
-				sess["artist_hint"] = True
-				cur = int(sess.get("listen_phase", 0))
-				last_i = len(QUIZ_PHASE_DURATIONS) - 1
-				if cur < last_i:
-					sess["listen_phase"] = cur + 1
-					nidx = int(sess["listen_phase"])
-					sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
-					sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
-					sess["issued_ms"] = self._now_ms()
-					with SOLO_QUIZ_LOCK:
-						SOLO_QUIZ_SESSIONS[sess["token"]] = sess
-					self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_solo_state(sess)}, 200)
+				if not bool(sess.get("artist_only_scored")):
+					sess.setdefault("guess_history", []).append({"text": guess, "kind": "artist_hint"})
+					sess["artist_hint"] = True
+					sess["artist_only_scored"] = True
+					sess["total_score"] = int(sess.get("total_score", 0)) + int(QUIZ_ARTIST_ONLY_POINTS)
+					cur = int(sess.get("listen_phase", 0))
+					last_i = len(QUIZ_PHASE_DURATIONS) - 1
+					if cur < last_i:
+						sess["listen_phase"] = cur + 1
+						nidx = int(sess["listen_phase"])
+						sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
+						sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
+						sess["issued_ms"] = self._now_ms()
+						with SOLO_QUIZ_LOCK:
+							SOLO_QUIZ_SESSIONS[sess["token"]] = sess
+						self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_solo_state(sess)}, 200)
+						return
+					sess["artist_hint"] = False
+					sess["wrong"] = True
+					self._solo_begin_reveal(sess)
+					self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_solo_state(sess)}, 200)
 					return
-				sess["artist_hint"] = False
-				sess["wrong"] = True
-				self._solo_begin_reveal(sess)
-				self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_solo_state(sess)}, 200)
-				return
+				# Najważniejsze: punkt za artystę już był — dalej jak zła odpowiedź (np. ten sam artysta + zły tytuł).
 			sess["artist_hint"] = False
 			cur = int(sess.get("listen_phase", 0))
 			last_i = len(QUIZ_PHASE_DURATIONS) - 1
-			sess.setdefault("guess_history", []).append({"text": guess, "kind": "wrong"})
+			hist_kind_solo = "wrong"
+			if bool(sess.get("artist_only_scored")) and self._artist_only_matches_round(guess, title, artist):
+				hist_kind_solo = "artist_hint"
+			sess.setdefault("guess_history", []).append({"text": guess, "kind": hist_kind_solo})
 			if cur < last_i:
 				sess["listen_phase"] = cur + 1
 				nidx = int(sess["listen_phase"])
@@ -1596,18 +1636,14 @@ class AppHandler(SimpleHTTPRequestHandler):
 				cur = 0
 			if cur > last_i:
 				cur = last_i
-			# Najważniejsze: na ostatniej fazie SKIP zablokowany — trzeba zgadnąć (spójnie z trybem wieloosobowym).
-			if cur >= last_i:
-				self.json_response(
-					{"error": "Na ostatniej szansie nie mozna uzyc SKIP — trzeba zgadnac."},
-					400,
-				)
-				return
 			sess["skips_used"] = int(sess.get("skips_used", 0)) + 1
 			sess["artist_hint"] = False
 			sess.setdefault("guess_history", []).append({"text": "SKIP", "kind": "skip"})
 			sess["listen_phase"] = cur + 1
 			nidx = int(sess["listen_phase"])
+			if nidx > last_i:
+				nidx = last_i
+				sess["listen_phase"] = nidx
 			sess["command_duration_sec"] = float(QUIZ_PHASE_DURATIONS[nidx])
 			sess["listen_token"] = int(sess.get("listen_token", 0)) + 1
 			sess["issued_ms"] = self._now_ms()
@@ -1730,6 +1766,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 			return
 		if parsed.path == "/api/quiz-next-phase":
 			self.handle_quiz_next_phase_post()
+			return
+		if parsed.path == "/api/quiz-admin-skip-song":
+			self.handle_quiz_admin_skip_song_post()
 			return
 		if parsed.path == "/api/quiz-guess":
 			self.handle_quiz_guess_post()
@@ -1988,6 +2027,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_ready_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_guessed_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_artist_hint_players"][str(assigned_player)] = False
+			oas = BUZZER_STATE.get("quiz_artist_only_scored")
+			if not isinstance(oas, dict):
+				BUZZER_STATE["quiz_artist_only_scored"] = {}
+				oas = BUZZER_STATE["quiz_artist_only_scored"]
+			oas[str(assigned_player)] = False
 			BUZZER_STATE["quiz_wrong_players"][str(assigned_player)] = False
 			BUZZER_STATE["quiz_wrong_guesses"][str(assigned_player)] = []
 			BUZZER_STATE["quiz_guess_history"][str(assigned_player)] = []
@@ -2030,6 +2074,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 			BUZZER_STATE["quiz_ready_players"][key] = False
 			BUZZER_STATE["quiz_guessed_players"][key] = False
 			BUZZER_STATE["quiz_artist_hint_players"][key] = False
+			oas = BUZZER_STATE.get("quiz_artist_only_scored")
+			if not isinstance(oas, dict):
+				BUZZER_STATE["quiz_artist_only_scored"] = {}
+				oas = BUZZER_STATE["quiz_artist_only_scored"]
+			oas[key] = False
 			BUZZER_STATE["quiz_wrong_players"][key] = False
 			BUZZER_STATE["quiz_wrong_guesses"][key] = []
 			BUZZER_STATE["quiz_guess_history"][key] = []
@@ -2334,6 +2383,40 @@ class AppHandler(SimpleHTTPRequestHandler):
 				parts.append(str(c.get("name") or ""))
 		return _fold_text_answer(" ".join(parts))
 
+	def _deezer_item_contributor_artist_ids(self, item):
+		out = []
+		am = item.get("artist") or {}
+		try:
+			aid = int(am.get("id") or 0)
+		except Exception:
+			aid = 0
+		if aid > 0:
+			out.append(aid)
+		for c in item.get("contributors") or []:
+			if isinstance(c, dict):
+				try:
+					cid = int(c.get("id") or 0)
+				except Exception:
+					cid = 0
+				if cid > 0:
+					out.append(cid)
+		return out
+
+	def _deezer_item_mata_polish_ok(self, item):
+		# Najważniejsze: tylko polska Mata — znany id Deezera albo polski ISRC (PL/PLS…), bez fałszywych profili „Mata”.
+		ids = set(self._deezer_item_contributor_artist_ids(item))
+		if ids.intersection(QUIZ_MATA_FAKE_DEEZER_ARTIST_IDS):
+			return False
+		if ids.intersection(QUIZ_MATA_POLISH_DEEZER_ARTIST_IDS):
+			return True
+		try:
+			isrc = str(item.get("isrc") or "").strip().upper()
+		except Exception:
+			isrc = ""
+		if isrc.startswith("PL"):
+			return True
+		return False
+
 	def _deezer_raw_item_quiz_whitelist_artist_ok(self, item):
 		# Najważniejsze: dopasowanie po znormalizowanej nazwie z QUIZ_POOL_WHITELIST_ARTISTS (krótkie nicki jak tokeny).
 		blob = self._deezer_quiz_whitelist_artist_blob(item)
@@ -2347,6 +2430,8 @@ class AppHandler(SimpleHTTPRequestHandler):
 				continue
 			if len(fs) <= 4:
 				if fs in tokens:
+					if fs == "mata":
+						return self._deezer_item_mata_polish_ok(item)
 					return True
 			else:
 				if fs in blob:
@@ -3052,6 +3137,42 @@ class AppHandler(SimpleHTTPRequestHandler):
 		except Exception as ex:
 			self.json_response({"error": str(ex)}, 500)
 
+	def handle_quiz_admin_skip_song_post(self):
+		# Najważniejsze: sobik — pomija aktualny utwór i losuje następny (w rundzie lub po ujawnieniu).
+		try:
+			self._ensure_round_started()
+			self._ensure_scores_and_names()
+			self._ensure_quiz_state()
+			length = int(self.headers.get("Content-Length", "0"))
+			raw = self.rfile.read(length)
+			parsed = json.loads(raw.decode("utf-8"))
+			if not isinstance(parsed, dict):
+				self.json_response({"error": "Payload must be an object"}, 400)
+				return
+			name = self._sanitize_name(parsed.get("name"), "")
+			if not self._is_video_controller(name):
+				self.json_response({"error": "Only sobik can skip song"}, 403)
+				return
+			with BUZZER_QUIZ_LOCK:
+				self._ensure_quiz_state()
+				if not bool(BUZZER_STATE.get("quiz_round_active")) and not bool(BUZZER_STATE.get("quiz_reveal_active")):
+					self.json_response({"error": "Quiz round is not active"}, 400)
+					return
+				cancel_quiz_auto_next_timer()
+				if not self._start_quiz_round_with_random_track():
+					if self._quiz_round_limit_reached():
+						self.json_response({"error": "Osiagnieto limit rund quizu (zwieksz limit lub zapisz ponownie)"}, 400)
+						return
+					msg = "No Deezer tracks available"
+					detail = str(_DEEZER_LAST_FETCH_ERR or "").strip()
+					if detail:
+						msg = "%s — %s" % (msg, detail[:220])
+					self.json_response({"error": msg}, 500)
+					return
+			self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
+		except Exception as ex:
+			self.json_response({"error": str(ex)}, 500)
+
 	def handle_quiz_next_phase_post(self):
 		try:
 			self._ensure_round_started()
@@ -3121,13 +3242,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 					self.json_response({"ok": True, "alreadyEliminated": True, "state": self._public_buzzer_state()}, 200)
 					return
 				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-				# Najważniejsze: na ostatniej fazie słuchania SKIP jest zablokowany — gracz musi zgadnąć (bez odpadu przez SKIP).
-				if cur >= last_i:
-					self.json_response(
-						{"error": "Na ostatniej szansie nie mozna uzyc SKIP — trzeba zgadnac."},
-						400,
-					)
-					return
 				su = BUZZER_STATE.get("quiz_skips_used")
 				if not isinstance(su, dict):
 					BUZZER_STATE["quiz_skips_used"] = {}
@@ -3197,32 +3311,45 @@ class AppHandler(SimpleHTTPRequestHandler):
 					self.json_response({"ok": True, "state": self._public_buzzer_state()}, 200)
 					return
 				if self._artist_only_matches_round(guess, title, artist):
-					self._append_quiz_guess_history(key, guess, "artist_hint")
-					BUZZER_STATE["quiz_artist_hint_players"][key] = True
-					lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-					if cur < last_i:
-						lp[key] = cur + 1
-						self._bump_quiz_listen_for_player(key)
+					oas = BUZZER_STATE.get("quiz_artist_only_scored")
+					if not isinstance(oas, dict):
+						BUZZER_STATE["quiz_artist_only_scored"] = {}
+						oas = BUZZER_STATE["quiz_artist_only_scored"]
+					if not bool(oas.get(key)):
+						self._append_quiz_guess_history(key, guess, "artist_hint")
+						BUZZER_STATE["quiz_artist_hint_players"][key] = True
+						oas[key] = True
+						prev_art = int(BUZZER_STATE["scores"].get(key, 0))
+						BUZZER_STATE["scores"][key] = prev_art + int(QUIZ_ARTIST_ONLY_POINTS)
+						lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
+						if cur < last_i:
+							lp[key] = cur + 1
+							self._bump_quiz_listen_for_player(key)
+							if self._all_occupied_finished_song():
+								self._begin_quiz_reveal()
+							self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
+							return
+						# Najważniejsze: na ostatniej fazie sam artysta = odpad (wcześniej każde wysłanie podbijało listen_token w nieskończoność).
+						BUZZER_STATE["quiz_artist_hint_players"][key] = False
+						BUZZER_STATE["quiz_wrong_players"][key] = True
+						prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
+						if not isinstance(prev, list):
+							prev = []
+							BUZZER_STATE["quiz_wrong_guesses"][key] = prev
+						prev.append(guess[:200])
+						self._refresh_quiz_listen_duration_no_token()
 						if self._all_occupied_finished_song():
 							self._begin_quiz_reveal()
-						self.json_response({"ok": True, "artistHintOnly": True, "state": self._public_buzzer_state()}, 200)
+						self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_buzzer_state()}, 200)
 						return
-					# Najważniejsze: na ostatniej fazie sam artysta = odpad (wcześniej każde wysłanie podbijało listen_token w nieskończoność).
-					BUZZER_STATE["quiz_artist_hint_players"][key] = False
-					BUZZER_STATE["quiz_wrong_players"][key] = True
-					prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)
-					if not isinstance(prev, list):
-						prev = []
-						BUZZER_STATE["quiz_wrong_guesses"][key] = prev
-					prev.append(guess[:200])
-					self._refresh_quiz_listen_duration_no_token()
-					if self._all_occupied_finished_song():
-						self._begin_quiz_reveal()
-					self.json_response({"ok": True, "guessWrong": True, "artistHintLastPhase": True, "state": self._public_buzzer_state()}, 200)
-					return
+					# Najważniejsze: punkt za artystę już był — ta sama logika co zła odpowiedź (np. artysta + zły tytuł bez drugiego punktu).
 				BUZZER_STATE["quiz_artist_hint_players"][key] = False
 				lp, cur, last_i = self._quiz_get_listen_phase_and_last(key)
-				self._append_quiz_guess_history(key, guess, "wrong")
+				hist_kind_wrong = "wrong"
+				oas_hist = BUZZER_STATE.get("quiz_artist_only_scored")
+				if isinstance(oas_hist, dict) and bool(oas_hist.get(key)) and self._artist_only_matches_round(guess, title, artist):
+					hist_kind_wrong = "artist_hint"
+				self._append_quiz_guess_history(key, guess, hist_kind_wrong)
 				if cur < last_i:
 					lp[key] = cur + 1
 					prev = BUZZER_STATE["quiz_wrong_guesses"].get(key)

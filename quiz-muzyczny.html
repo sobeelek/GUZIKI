@@ -449,8 +449,7 @@
 			cursor: not-allowed;
 		}
 
-		.skip-phase-btn--blocked-last:disabled {
-			opacity: 1;
+		.skip-phase-btn.skip-phase-btn--last-phase-hint:not(:disabled) {
 			background: #7f1d1d;
 			border-color: #dc2626;
 			color: #fecaca;
@@ -495,49 +494,18 @@
 			border-color: transparent transparent transparent #450a0a;
 		}
 
-		.skip-phase-btn-wrap--blocked {
+		.skip-phase-btn-wrap--last-hint {
 			cursor: help;
 		}
 
-		.skip-phase-btn-wrap--blocked:hover .skip-last-chance-bubble,
-		.skip-phase-btn-wrap--blocked:focus-within .skip-last-chance-bubble {
+		.skip-phase-btn-wrap--last-hint:hover .skip-last-chance-bubble,
+		.skip-phase-btn-wrap--last-hint:focus-within .skip-last-chance-bubble {
 			opacity: 1;
 			visibility: visible;
 		}
 
 		.guess-form {
 			margin: 0;
-		}
-
-		.phase-answer-timer-wrap {
-			margin: 0 0 8px;
-			display: grid;
-			gap: 0;
-		}
-
-		.phase-answer-timer-wrap.hidden {
-			display: none;
-		}
-
-		.phase-answer-timer-track {
-			position: relative;
-			height: 8px;
-			border-radius: 999px;
-			background: #0f172a;
-			border: 1px solid #334155;
-			overflow: hidden;
-		}
-
-		.phase-answer-timer-fill {
-			position: absolute;
-			left: 0;
-			top: 0;
-			bottom: 0;
-			width: 100%;
-			border-radius: 999px;
-			background: linear-gradient(90deg, #b45309, #f59e0b, #fbbf24);
-			transform-origin: left center;
-			transition: width 0.08s linear;
 		}
 
 		.quiz-phase-badge {
@@ -1452,6 +1420,9 @@
 					<button id="nextPhaseBtn">Nastepna faza</button>
 					<button id="autoToggleBtn">Auto: ON</button>
 					<button id="stopClipBtn">Stop klipu</button>
+					<button type="button" id="adminSkipSongBtn" title="Pomija aktualny utwor i losuje nastepny">
+						Pomin utwor
+					</button>
 					<button type="button" id="resetFullQuizBtn" title="Zeruje punkty, rundy i stan quizu (gdy cos sie zawiesi)">Reset calego quizu</button>
 				</div>
 			</div>
@@ -1461,7 +1432,7 @@
 					<div class="quiz-card-side-actions" aria-label="Akcje karty">
 						<div class="skip-phase-btn-wrap" id="skipPhaseHoverWrap">
 							<span id="skipLastChanceBubble" class="skip-last-chance-bubble" role="tooltip">
-								Ostatnia szansa: SKIP wylaczony. Musisz zgadnac — inaczej odpadasz przy zlym strzale.
+								Ostatnia faza sluchania: to ostatni SKIP — potem tylko pelna odpowiedz (tytul i artysta) albo odpad przy bledzie.
 							</span>
 							<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>
 								SKIP
@@ -1519,11 +1490,6 @@
 				</div>
 				<div class="quiz-card-guess-slot">
 					<p id="quizLimitBanner" class="quiz-phase-badge hidden" style="color:#fbbf24;" aria-live="polite"></p>
-					<div id="phaseAnswerTimerWrap" class="phase-answer-timer-wrap hidden" aria-label="Auto SKIP" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-						<div class="phase-answer-timer-track" aria-hidden="true">
-							<div id="phaseAnswerTimerFill" class="phase-answer-timer-fill"></div>
-						</div>
-					</div>
 					<div class="guess-autocomplete-wrap">
 						<form id="guessForm" class="guess-form" action="#" method="post">
 							<div class="guess-row">
@@ -1580,8 +1546,6 @@
 		// Najważniejsze: QUIZ_CARD_FLIP_BACK_MS zgodny z transition na .quiz-card-inner (120ms); audio nowej rundy po QUIZ_CARD_NEW_CLIP_DELAY_MS.
 		const QUIZ_CARD_FLIP_BACK_MS = 120;
 		const QUIZ_CARD_NEW_CLIP_DELAY_MS = QUIZ_CARD_FLIP_BACK_MS + 40;
-		// Najważniejsze: czas na odpowiedź po zakończeniu klipu fazy — potem auto SKIP (jak przycisk), nie na ostatniej szansie.
-		const QUIZ_PHASE_ANSWER_MS = 10000;
 		const meInfo = document.getElementById("meInfo");
 		const adminUiPeekBar = document.getElementById("adminUiPeekBar");
 		const adminUiTopSection = document.getElementById("adminUiTopSection");
@@ -1600,6 +1564,7 @@
 		const nextPhaseBtn = document.getElementById("nextPhaseBtn");
 		const autoToggleBtn = document.getElementById("autoToggleBtn");
 		const stopClipBtn = document.getElementById("stopClipBtn");
+		const adminSkipSongBtn = document.getElementById("adminSkipSongBtn");
 		const resetFullQuizBtn = document.getElementById("resetFullQuizBtn");
 		const volumeRange = document.getElementById("volumeRange");
 		const volumeLabel = document.getElementById("volumeLabel");
@@ -1611,8 +1576,6 @@
 		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
 		const skipPhaseHoverWrap = document.getElementById("skipPhaseHoverWrap");
 		const replayListenBtn = document.getElementById("replayListenBtn");
-		const phaseAnswerTimerWrap = document.getElementById("phaseAnswerTimerWrap");
-		const phaseAnswerTimerFill = document.getElementById("phaseAnswerTimerFill");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
 		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
@@ -1660,13 +1623,7 @@
 		let quizEndOverlayDismissed = false;
 		let lastQuizRevealActiveForUi = false;
 		let lastRevealFlipAnimToken = -1;
-		let phaseAnswerDeadlineTimer = null;
-		let phaseAnswerUiInterval = null;
-		let phaseAnswerEndAtMs = 0;
-		let phaseAnswerSnapCmd = -1;
-		let phaseAnswerSnapLt = -1;
-		let phaseAnswerTotalMs = 0;
-		let quizClipLocalStartMs = 0; // Start biezacego klipu u klienta — auto-SKIP liczony od tego (poll dogania brak setTimeout).
+		let quizClipLocalStartMs = 0;
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
 		function getAdminTopHiddenStorageKey() { return getStorageKey("quiz_admin_top_hidden"); }
@@ -2285,198 +2242,6 @@
 			clipProgressRaf = requestAnimationFrame(tick);
 		}
 
-		function hidePhaseAnswerTimerUi() {
-			if (phaseAnswerTimerWrap) {
-				phaseAnswerTimerWrap.classList.add("hidden");
-			}
-			if (phaseAnswerTimerFill) {
-				phaseAnswerTimerFill.style.width = "0%";
-			}
-			phaseAnswerEndAtMs = 0;
-			phaseAnswerTotalMs = 0;
-		}
-
-		function tickPhaseAnswerTimerUi() {
-			if (!phaseAnswerEndAtMs || !phaseAnswerTimerFill) {
-				return;
-			}
-			const left = Math.max(0, phaseAnswerEndAtMs - Date.now());
-			const denom = phaseAnswerTotalMs > 0 ? phaseAnswerTotalMs : QUIZ_PHASE_ANSWER_MS;
-			const pct = Math.min(100, Math.max(0, (left / denom) * 100));
-			phaseAnswerTimerFill.style.width = pct + "%";
-			if (phaseAnswerTimerWrap) {
-				phaseAnswerTimerWrap.setAttribute("aria-valuenow", String(Math.round(pct)));
-			}
-		}
-
-		function clearPhaseAnswerDeadline() {
-			if (phaseAnswerUiInterval) {
-				clearInterval(phaseAnswerUiInterval);
-				phaseAnswerUiInterval = null;
-			}
-			if (phaseAnswerDeadlineTimer) {
-				clearTimeout(phaseAnswerDeadlineTimer);
-				phaseAnswerDeadlineTimer = null;
-			}
-			hidePhaseAnswerTimerUi();
-			phaseAnswerSnapCmd = -1;
-			phaseAnswerSnapLt = -1;
-		}
-
-		function schedulePhaseAnswerSkipTimeout(delayMs) {
-			phaseAnswerDeadlineTimer = setTimeout(function () {
-				phaseAnswerDeadlineTimer = null;
-				const st = currentState;
-				if (!st || !myPlayer) {
-					return;
-				}
-				if (!Boolean(st.quizRoundActive) || Boolean(st.quizRevealActive)) {
-					return;
-				}
-				if (Number(st.quizCommandToken || 0) !== phaseAnswerSnapCmd) {
-					return;
-				}
-				const ltNow = Number(
-					(st.quizListenTokens || {})[String(myPlayer)] != null
-						? (st.quizListenTokens || {})[String(myPlayer)]
-						: 0
-				);
-				if (ltNow !== phaseAnswerSnapLt) {
-					return;
-				}
-				if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-					return;
-				}
-				if (guessInput && guessInput.disabled) {
-					return;
-				}
-				if (resolveListenOnLastChance(st, myPlayer)) {
-					return;
-				}
-				const skMap1 = st.quizSkipsUsed || {};
-				if (Number(skMap1[String(myPlayer)] != null ? skMap1[String(myPlayer)] : 0) >= QUIZ_MAX_SKIPS) {
-					return;
-				}
-				skipPhase();
-			}, delayMs);
-		}
-
-		function beginPhaseAnswerWindow(stateSnap) {
-			clearPhaseAnswerDeadline();
-			if (!stateSnap || !myPlayer) {
-				return;
-			}
-			if (!Boolean(stateSnap.quizRoundActive) || Boolean(stateSnap.quizRevealActive)) {
-				return;
-			}
-			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-				return;
-			}
-			if (resolveListenOnLastChance(stateSnap, myPlayer)) {
-				return;
-			}
-			const skMap0 = stateSnap.quizSkipsUsed || {};
-			const su0 = Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0);
-			if (su0 >= QUIZ_MAX_SKIPS) {
-				return;
-			}
-			const durSec = resolveQuizListenDurationForMe(stateSnap);
-			if (quizClipLocalStartMs <= 0 || durSec <= 0) {
-				return;
-			}
-			phaseAnswerTotalMs = durSec * 1000 + QUIZ_PHASE_ANSWER_MS;
-			phaseAnswerEndAtMs = quizClipLocalStartMs + phaseAnswerTotalMs;
-			const delayMs = Math.max(0, phaseAnswerEndAtMs - Date.now());
-			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
-			phaseAnswerSnapLt = Number(
-				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
-					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
-					: 0
-			);
-			if (phaseAnswerTimerWrap) {
-				phaseAnswerTimerWrap.classList.remove("hidden");
-			}
-			tickPhaseAnswerTimerUi();
-			phaseAnswerUiInterval = window.setInterval(tickPhaseAnswerTimerUi, 100);
-			schedulePhaseAnswerSkipTimeout(delayMs);
-		}
-
-		function scheduleAnswerOnlyAfterManualStop(stateSnap) {
-			clearPhaseAnswerDeadline();
-			if (!stateSnap || !myPlayer) {
-				return;
-			}
-			if (!Boolean(stateSnap.quizRoundActive) || Boolean(stateSnap.quizRevealActive)) {
-				return;
-			}
-			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-				return;
-			}
-			if (resolveListenOnLastChance(stateSnap, myPlayer)) {
-				return;
-			}
-			const skMap0 = stateSnap.quizSkipsUsed || {};
-			const su0 = Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0);
-			if (su0 >= QUIZ_MAX_SKIPS) {
-				return;
-			}
-			phaseAnswerTotalMs = QUIZ_PHASE_ANSWER_MS;
-			phaseAnswerEndAtMs = Date.now() + QUIZ_PHASE_ANSWER_MS;
-			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
-			phaseAnswerSnapLt = Number(
-				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
-					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
-					: 0
-			);
-			if (phaseAnswerTimerWrap) {
-				phaseAnswerTimerWrap.classList.remove("hidden");
-			}
-			tickPhaseAnswerTimerUi();
-			phaseAnswerUiInterval = window.setInterval(tickPhaseAnswerTimerUi, 100);
-			schedulePhaseAnswerSkipTimeout(Math.max(0, phaseAnswerEndAtMs - Date.now()));
-		}
-
-		// Najwazniejsze: kazdy klient (poll) odtwarza auto-SKIP gdy timer po koncu klipu nie zadzialal (throttling, autoplay).
-		function ensurePhaseAnswerDeadlineFromLocalClip(state) {
-			if (!state || !myPlayer) {
-				return;
-			}
-			if (!Boolean(state.quizRoundActive) || Boolean(state.quizRevealActive)) {
-				return;
-			}
-			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-				return;
-			}
-			if (resolveListenOnLastChance(state, myPlayer)) {
-				return;
-			}
-			const skMap0 = state.quizSkipsUsed || {};
-			if (Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0) >= QUIZ_MAX_SKIPS) {
-				return;
-			}
-			if (phaseAnswerDeadlineTimer) {
-				return;
-			}
-			if (quizClipLocalStartMs <= 0) {
-				return;
-			}
-			const durSec = resolveQuizListenDurationForMe(state);
-			if (durSec <= 0) {
-				return;
-			}
-			const clipEndMs = quizClipLocalStartMs + durSec * 1000;
-			const answerEndMs = clipEndMs + QUIZ_PHASE_ANSWER_MS;
-			const now = Date.now();
-			if (now < clipEndMs) {
-				return;
-			}
-			if (now >= answerEndMs) {
-				skipPhase();
-				return;
-			}
-			beginPhaseAnswerWindow(state);
-		}
-
 		function softStopClipPlayback() {
 			if (clipStopTimer) {
 				clearTimeout(clipStopTimer);
@@ -2494,7 +2259,6 @@
 
 		function stopCurrentClip() {
 			quizClipLocalStartMs = 0;
-			clearPhaseAnswerDeadline();
 			if (clipStopTimer) {
 				clearTimeout(clipStopTimer);
 				clipStopTimer = null;
@@ -2812,10 +2576,7 @@
 				if (clipStopTimer) {
 					clearTimeout(clipStopTimer);
 				}
-				// Najwazniejsze: ponow nie resetuje terminu auto-SKIP — nowy start klipu tylko gdy okno SKIP jeszcze nie dziala.
-				if (!(phaseAnswerEndAtMs > Date.now())) {
-					quizClipLocalStartMs = Date.now();
-				}
+				quizClipLocalStartMs = Date.now();
 				clipStopTimer = setTimeout(function () {
 					softStopClipPlayback();
 				}, dur * 1000);
@@ -2858,9 +2619,6 @@
 					startClipProgressRevealBar(0, durationSec);
 				}
 				quizClipLocalStartMs = Date.now();
-				if (!reveal) {
-					beginPhaseAnswerWindow(state);
-				}
 				clipStopTimer = setTimeout(function () {
 					softStopClipPlayback();
 				}, durationSec * 1000);
@@ -2930,11 +2688,11 @@
 		}
 
 		function applySkipLastChanceHint(onLastChance, roundOn, revealOn, myWrong, guessed) {
-			// Najwazniejsze: czerwony SKIP i dymek przy hoverze — ostatnia faza, serwer tez blokuje skip.
+			// Najwazniejsze: czerwony SKIP i dymek — ostatnia faza, informacja o ostatnim SKIP (serwer znowu pozwala skip).
 			const showMsg = Boolean(onLastChance && roundOn && !revealOn && !myWrong && !guessed);
-			skipPhaseBtn.classList.toggle("skip-phase-btn--blocked-last", showMsg);
+			skipPhaseBtn.classList.toggle("skip-phase-btn--last-phase-hint", showMsg);
 			if (skipPhaseHoverWrap) {
-				skipPhaseHoverWrap.classList.toggle("skip-phase-btn-wrap--blocked", showMsg);
+				skipPhaseHoverWrap.classList.toggle("skip-phase-btn-wrap--last-hint", showMsg);
 			}
 			if (showMsg) {
 				skipPhaseBtn.setAttribute("aria-describedby", "skipLastChanceBubble");
@@ -3067,7 +2825,7 @@
 			const skipsUsedEarly = Number(skipsMapEarly[String(myPlayer)] != null ? skipsMapEarly[String(myPlayer)] : 0);
 			const onLastChance = resolveListenOnLastChance(state, myPlayer);
 			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
-			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS || onLastChance;
+			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS;
 			applySkipLastChanceHint(onLastChance, roundOn, revealOn, myWrong, isPlayerGuessed(myPlayer));
 			replayListenBtn.disabled = !roundOn || revealOn || isPlayerGuessed(myPlayer) || myWrong;
 			if (myWrong && roundOn) {
@@ -3118,18 +2876,6 @@
 			updateQuizEndOverlay(state, roundOn, revealOn, exhausted);
 			updateAdminUi();
 			renderScoreboard();
-			if (revealOn || !roundOn || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
-				clearPhaseAnswerDeadline();
-			}
-			if (
-				Boolean(state.quizRoundActive) &&
-				!Boolean(state.quizRevealActive) &&
-				myPlayer &&
-				!isPlayerGuessed(myPlayer) &&
-				!isQuizWrong(myPlayer)
-			) {
-				ensurePhaseAnswerDeadlineFromLocalClip(state);
-			}
 			if (instantRevealToRound) {
 				window.setTimeout(function () {
 					if (quizCardInner) {
@@ -3157,7 +2903,6 @@
 			if (skipPhaseInFlight) {
 				return;
 			}
-			clearPhaseAnswerDeadline();
 			if (!myPlayer || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
 				return;
 			}
@@ -3197,7 +2942,6 @@
 				setStatus("za krotko");
 				return;
 			}
-			clearPhaseAnswerDeadline();
 			guessSubmitInFlight = true;
 			hideGuessSuggest();
 			try {
@@ -3323,15 +3067,23 @@
 		});
 		stopClipBtn.addEventListener("click", function () {
 			stopCurrentClip();
-			if (
-				currentState &&
-				Boolean(currentState.quizRoundActive) &&
-				!Boolean(currentState.quizRevealActive) &&
-				myPlayer &&
-				!isPlayerGuessed(myPlayer) &&
-				!isQuizWrong(myPlayer)
-			) {
-				scheduleAnswerOnlyAfterManualStop(currentState);
+		});
+		adminSkipSongBtn.addEventListener("click", async function () {
+			if (!isAdmin()) {
+				return;
+			}
+			try {
+				const data = await fetchJson("/api/quiz-admin-skip-song", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name: myName })
+				});
+				updateByState(data.state);
+				setStatus("OK");
+			} catch (err) {
+				const msg = err && err.message ? String(err.message) : "blad";
+				setStatus(msg);
+				refreshState();
 			}
 		});
 		volumeRange.addEventListener("input", () => {
