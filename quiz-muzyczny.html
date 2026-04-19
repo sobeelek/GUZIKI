@@ -54,6 +54,31 @@
 			color: #9ca3af;
 		}
 
+		.admin-ui-peek-bar {
+			margin: 0 0 12px;
+			padding: 8px 10px;
+			border-radius: 10px;
+			background: #111827;
+			border: 1px solid #374151;
+			font-size: 13px;
+			color: #e5e7eb;
+		}
+
+		.admin-ui-peek-label {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			cursor: pointer;
+			user-select: none;
+		}
+
+		.admin-ui-peek-label input {
+			width: 16px;
+			height: 16px;
+			cursor: pointer;
+			flex-shrink: 0;
+		}
+
 		.section {
 			background: #111827;
 			border: 1px solid #374151;
@@ -351,14 +376,22 @@
 			background: #1f2937;
 		}
 
-		.guess-row--with-skip {
-			display: grid;
-			grid-template-columns: 1fr auto auto;
+		.quiz-card-side-actions {
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
 			gap: 10px;
-			align-items: stretch;
+			flex: 0 0 auto;
+			align-self: center;
+			min-width: 88px;
 		}
 
-		.guess-row--with-skip input {
+		.quiz-card-side-actions .skip-phase-btn {
+			width: 100%;
+			box-sizing: border-box;
+		}
+
+		.guess-row input {
 			width: 100%;
 			box-sizing: border-box;
 		}
@@ -388,32 +421,6 @@
 			font-size: 14px;
 			font-weight: 600;
 			color: #93c5fd;
-		}
-
-		.reveal-panel {
-			border: 2px solid #22c55e;
-			border-radius: 12px;
-			padding: 14px;
-			background: #052e16;
-			font-size: 18px;
-			font-weight: 700;
-			text-align: center;
-			color: #ecfdf5;
-		}
-
-		.reveal-panel .reveal-title-line {
-			font-size: 24px;
-			font-weight: 800;
-			line-height: 1.25;
-			color: #ecfdf5;
-			word-break: break-word;
-		}
-
-		.reveal-panel .reveal-artist-line {
-			margin-top: 8px;
-			font-size: 17px;
-			font-weight: 600;
-			color: #bbf7d0;
 		}
 
 		.quiz-progress-wrap {
@@ -470,10 +477,11 @@
 		}
 
 		.guess-input-main {
-			font-size: 18px !important;
+			font-size: 22px !important;
 			font-weight: 600;
-			padding: 16px 18px !important;
-			min-height: 52px;
+			padding: 22px 22px !important;
+			min-height: 68px;
+			line-height: 1.3;
 			border: 2px solid #3b82f6 !important;
 			background: #020617 !important;
 			box-shadow: 0 4px 20px rgba(37, 99, 235, 0.2);
@@ -626,51 +634,580 @@
 			justify-content: center;
 		}
 
+		/* Karta + pasek postępu + głośność z boku + pole zgadywania */
+		.quiz-card-layout {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			width: 100%;
+			gap: 14px;
+			margin: 0 0 20px;
+			box-sizing: border-box;
+		}
+
+		.quiz-card-row {
+			display: flex;
+			flex-direction: row;
+			align-items: stretch;
+			justify-content: center;
+			gap: 12px;
+			width: 100%;
+			box-sizing: border-box;
+		}
+
+		.quiz-card-main-col {
+			width: min(320px, 78vw);
+			flex: 0 0 auto;
+			display: flex;
+			flex-direction: column;
+			align-items: stretch;
+			gap: 12px;
+		}
+
+		.quiz-card-progress-section {
+			margin: 18px 0 0;
+			padding: 10px 12px;
+		}
+
+		.quiz-card-progress-section .quiz-progress-wrap {
+			margin-top: 0;
+		}
+
+		.quiz-card-volume-rail {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 8px;
+			flex: 0 0 auto;
+			width: 50px;
+			min-height: 200px;
+			padding: 10px 6px;
+			border-radius: 12px;
+			background: #111827;
+			border: 1px solid #374151;
+			box-sizing: border-box;
+			align-self: center;
+		}
+
+		.quiz-card-volume-cap {
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.08em;
+			text-transform: uppercase;
+			color: #94a3b8;
+			writing-mode: vertical-rl;
+			text-orientation: mixed;
+			transform: rotate(180deg);
+			line-height: 1.2;
+			max-height: 76px;
+			overflow: hidden;
+		}
+
+		.quiz-card-volume-spin {
+			height: 150px;
+			width: 40px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			overflow: visible;
+		}
+
+		input.quiz-card-volume-input-vertical[type="range"] {
+			width: 150px;
+			height: 36px;
+			padding: 0;
+			margin: 0;
+			transform: rotate(-90deg);
+			transform-origin: center center;
+			cursor: pointer;
+		}
+
+		.quiz-card-volume-val {
+			font-size: 12px;
+			font-weight: 700;
+			font-variant-numeric: tabular-nums;
+			color: #e5e7eb;
+		}
+
+		.quiz-card-guess-slot {
+			width: min(1100px, 96vw);
+			max-width: 100%;
+			box-sizing: border-box;
+		}
+
+		@media (max-width: 520px) {
+			.quiz-card-row {
+				flex-direction: column;
+				align-items: center;
+			}
+			.quiz-card-volume-rail {
+				flex-direction: row;
+				width: min(320px, 98vw);
+				min-height: auto;
+				padding: 10px 14px;
+				justify-content: space-between;
+				align-items: center;
+			}
+			.quiz-card-volume-cap {
+				writing-mode: horizontal-tb;
+				transform: none;
+				max-height: none;
+				font-size: 12px;
+			}
+			.quiz-card-volume-spin {
+				flex: 1;
+				height: 40px;
+				width: auto;
+				min-width: 0;
+			}
+			input.quiz-card-volume-input-vertical[type="range"] {
+				width: 100%;
+				max-width: 220px;
+				height: 36px;
+				transform: none;
+			}
+		}
+
+		/* Karta quizu: front = grafika; tył = tytuł + „płomienie” + głębia 3D */
+		.quiz-card-stage {
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			margin: 0;
+			perspective: 1200px;
+			perspective-origin: 50% 42%;
+			transition: perspective 0.65s ease;
+		}
+
+		/* Po odkryciu węższa perspektywa = wyraźniejsze zbliżanie / oddalanie w 3D */
+		.quiz-card-stage--revealed {
+			perspective: 920px;
+		}
+
+		.quiz-card-float {
+			position: relative;
+			transform-style: preserve-3d;
+			-webkit-transform-style: preserve-3d;
+			will-change: transform;
+			animation: quiz-card-3d-float 9s ease-in-out infinite;
+		}
+
+		.quiz-card-stage--revealed .quiz-card-float {
+			animation: quiz-card-reveal-dolly 3.8s ease-in-out infinite;
+		}
+
+		@keyframes quiz-card-3d-float {
+			0%, 100% {
+				transform: rotateX(8deg) rotateY(-14deg) translateZ(0);
+			}
+			50% {
+				transform: rotateX(5deg) rotateY(11deg) translateZ(22px);
+			}
+		}
+
+		/* Po trafieniu: karta „oddala się” i znów przybliża (dolly + skala), lekki obrót */
+		@keyframes quiz-card-reveal-dolly {
+			0%, 100% {
+				transform:
+					rotateX(5deg) rotateY(-4deg)
+					translateZ(-18px)
+					scale3d(0.9, 0.9, 1);
+			}
+			50% {
+				transform:
+					rotateX(8deg) rotateY(5deg)
+					translateZ(44px)
+					scale3d(1.1, 1.1, 1);
+			}
+		}
+
+		/* Bez filter na tym elemencie — filter spłaszcza scenę 3D i po obrocie widać dalej front */
+		.quiz-card-inner {
+			position: relative;
+			display: grid;
+			width: min(320px, 78vw);
+			transform-style: preserve-3d;
+			-webkit-transform-style: preserve-3d;
+			transition: transform 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+			border-radius: 16px;
+			box-shadow: 0 22px 44px rgba(0, 0, 0, 0.48);
+		}
+
+		.quiz-card-stage--revealed .quiz-card-inner {
+			transform: rotateY(180deg) translateZ(6px);
+			box-shadow:
+				0 28px 52px rgba(0, 0, 0, 0.55),
+				0 0 40px rgba(249, 115, 22, 0.24),
+				0 0 28px rgba(234, 179, 8, 0.16);
+		}
+
+		.quiz-card-face {
+			grid-area: 1 / 1;
+			width: 100%;
+			border-radius: 16px;
+			backface-visibility: hidden;
+			-webkit-backface-visibility: hidden;
+		}
+
+		.quiz-card-face--front {
+			overflow: hidden;
+			transform: translateZ(3px);
+		}
+
+		.quiz-card-img {
+			display: block;
+			width: 100%;
+			height: auto;
+			border-radius: 16px;
+			box-shadow:
+				0 2px 4px rgba(0, 0, 0, 0.45),
+				0 28px 56px rgba(15, 23, 42, 0.75),
+				0 0 40px rgba(37, 99, 235, 0.22),
+				0 18px 32px rgba(0, 0, 0, 0.45),
+				inset 0 1px 0 rgba(255, 255, 255, 0.06);
+		}
+
+		.quiz-card-face--back {
+			transform: rotateY(180deg) translateZ(4px);
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 0;
+			min-height: 100%;
+			padding: 0;
+			box-sizing: border-box;
+			text-align: center;
+			overflow: hidden;
+			background:
+				radial-gradient(120% 80% at 50% 0%, rgba(180, 83, 9, 0.35) 0%, transparent 55%),
+				radial-gradient(ellipse 90% 60% at 50% 100%, rgba(127, 29, 29, 0.45) 0%, transparent 50%),
+				linear-gradient(155deg, #0c1a0f 0%, #0f172a 42%, #1a0a0a 100%);
+			box-shadow:
+				0 2px 4px rgba(0, 0, 0, 0.5),
+				0 32px 64px rgba(0, 0, 0, 0.65),
+				inset 0 1px 0 rgba(255, 255, 255, 0.07),
+				inset 0 -30px 50px rgba(220, 38, 38, 0.12);
+		}
+
+		.quiz-card-stage--revealed .quiz-card-face--back {
+			animation: quiz-card-back-glow 2.8s ease-in-out infinite alternate;
+		}
+
+		@keyframes quiz-card-back-glow {
+			0% {
+				box-shadow:
+					0 2px 4px rgba(0, 0, 0, 0.5),
+					0 32px 64px rgba(0, 0, 0, 0.65),
+					inset 0 1px 0 rgba(255, 255, 255, 0.07),
+					0 0 40px rgba(234, 88, 12, 0.25);
+			}
+			100% {
+				box-shadow:
+					0 2px 4px rgba(0, 0, 0, 0.5),
+					0 36px 70px rgba(0, 0, 0, 0.7),
+					inset 0 1px 0 rgba(255, 255, 255, 0.09),
+					0 0 56px rgba(251, 191, 36, 0.35);
+			}
+		}
+
+		.quiz-card-back-vignette {
+			position: absolute;
+			inset: 0;
+			border-radius: 16px;
+			pointer-events: none;
+			background: radial-gradient(ellipse 85% 70% at 50% 35%, transparent 30%, rgba(0, 0, 0, 0.55) 100%);
+			z-index: 0;
+		}
+
+		/* Dolna dekoracja: „equalizer” + poświata (bez ognia, bez filter na karcie) */
+		.quiz-card-fx {
+			position: absolute;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			height: 52%;
+			pointer-events: none;
+			z-index: 1;
+			overflow: hidden;
+			border-radius: 0 0 16px 16px;
+		}
+
+		.quiz-card-fx::before {
+			content: "";
+			position: absolute;
+			left: -18%;
+			right: -18%;
+			bottom: -28%;
+			height: 95%;
+			opacity: 0;
+			z-index: 0;
+			background:
+				radial-gradient(ellipse 90% 50% at 50% 100%, rgba(56, 189, 248, 0.38) 0%, transparent 58%),
+				radial-gradient(ellipse 55% 40% at 22% 95%, rgba(139, 92, 246, 0.32) 0%, transparent 52%),
+				radial-gradient(ellipse 55% 40% at 78% 95%, rgba(236, 72, 153, 0.22) 0%, transparent 52%);
+			transition: opacity 0.5s ease;
+		}
+
+		.quiz-card-stage--revealed .quiz-card-fx::before {
+			opacity: 1;
+			animation: quiz-spectrum-glow 5s ease-in-out infinite alternate;
+		}
+
+		@keyframes quiz-spectrum-glow {
+			0%, 100% {
+				opacity: 0.55;
+				transform: translateX(-3%) scaleX(1);
+			}
+			50% {
+				opacity: 0.92;
+				transform: translateX(3%) scaleX(1.04);
+			}
+		}
+
+		.quiz-card-eq {
+			position: absolute;
+			left: 6%;
+			right: 6%;
+			bottom: 0;
+			top: 18%;
+			display: flex;
+			align-items: flex-end;
+			justify-content: center;
+			gap: 5px;
+			z-index: 2;
+			opacity: 0;
+			transition: opacity 0.45s ease;
+		}
+
+		.quiz-card-stage--revealed .quiz-card-eq {
+			opacity: 1;
+		}
+
+		.quiz-card-eq-bar {
+			flex: 1 1 0;
+			max-width: 22px;
+			min-width: 5px;
+			height: 72%;
+			border-radius: 6px 6px 2px 2px;
+			transform-origin: 50% 100%;
+			transform: scaleY(0.22);
+			background: linear-gradient(
+				180deg,
+				#e0f2fe 0%,
+				#38bdf8 28%,
+				#6366f1 72%,
+				#4c1d95 100%
+			);
+			box-shadow:
+				0 0 14px rgba(56, 189, 248, 0.55),
+				0 0 26px rgba(99, 102, 241, 0.25);
+			animation: quiz-eq-pulse 0.52s ease-in-out infinite alternate;
+		}
+
+		.quiz-card-eq-bar:nth-child(1) {
+			animation-duration: 0.38s;
+			animation-delay: 0s;
+		}
+
+		.quiz-card-eq-bar:nth-child(2) {
+			animation-duration: 0.48s;
+			animation-delay: 0.07s;
+		}
+
+		.quiz-card-eq-bar:nth-child(3) {
+			animation-duration: 0.35s;
+			animation-delay: 0.14s;
+		}
+
+		.quiz-card-eq-bar:nth-child(4) {
+			animation-duration: 0.55s;
+			animation-delay: 0.03s;
+		}
+
+		.quiz-card-eq-bar:nth-child(5) {
+			animation-duration: 0.42s;
+			animation-delay: 0.11s;
+		}
+
+		.quiz-card-eq-bar:nth-child(6) {
+			animation-duration: 0.5s;
+			animation-delay: 0.09s;
+		}
+
+		.quiz-card-eq-bar:nth-child(7) {
+			animation-duration: 0.4s;
+			animation-delay: 0.16s;
+		}
+
+		@keyframes quiz-eq-pulse {
+			0% {
+				transform: scaleY(0.18);
+			}
+			100% {
+				transform: scaleY(1);
+			}
+		}
+
+		.quiz-card-back-copy {
+			position: relative;
+			z-index: 5;
+			padding: 26px 20px 38px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 12px;
+			width: 100%;
+			box-sizing: border-box;
+			isolation: isolate;
+		}
+
+		.quiz-card-back-title {
+			font-size: clamp(18px, 4.2vw, 24px);
+			font-weight: 800;
+			line-height: 1.28;
+			letter-spacing: 0.02em;
+			word-break: break-word;
+			max-width: 100%;
+			opacity: 0;
+			transform: translateY(14px) scale(0.96);
+		}
+
+		.quiz-card-stage--revealed .quiz-card-back-title:not(:empty) {
+			color: #fef3c7;
+			-webkit-text-fill-color: #fef3c7;
+			text-shadow:
+				0 2px 6px rgba(0, 0, 0, 0.95),
+				0 0 28px rgba(251, 191, 36, 0.55);
+			animation: quiz-back-title-in 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+		}
+
+		@keyframes quiz-back-title-in {
+			to {
+				opacity: 1;
+				transform: translateY(0) scale(1);
+			}
+		}
+
+		.quiz-card-back-artist {
+			font-size: clamp(14px, 3.2vw, 18px);
+			font-weight: 700;
+			line-height: 1.35;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			color: #a5f3fc;
+			-webkit-text-fill-color: #a5f3fc;
+			opacity: 0;
+			transform: translateY(10px);
+			text-shadow:
+				0 0 14px rgba(34, 211, 238, 0.55),
+				0 0 32px rgba(56, 189, 248, 0.25),
+				0 2px 8px rgba(0, 0, 0, 0.9);
+		}
+
+		.quiz-card-stage--revealed .quiz-card-back-artist:not(:empty) {
+			animation: quiz-back-artist-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.18s forwards;
+		}
+
+		@keyframes quiz-back-artist-in {
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+
+		.quiz-card-back-title:empty {
+			display: none;
+		}
+
+		.quiz-card-back-artist:empty {
+			display: none;
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			.quiz-card-float {
+				animation: none;
+				transform: rotateX(6deg) rotateY(-8deg);
+			}
+			.quiz-card-stage--revealed {
+				perspective: 1200px;
+			}
+			.quiz-card-stage--revealed .quiz-card-float {
+				animation: none;
+				transform: rotateX(6deg) rotateY(2deg) translateZ(12px) scale3d(1, 1, 1);
+			}
+			.quiz-card-inner {
+				transition: transform 0.35s ease;
+			}
+			.quiz-card-stage--revealed .quiz-card-inner {
+				box-shadow: 0 24px 46px rgba(0, 0, 0, 0.52);
+			}
+			.quiz-card-stage--revealed .quiz-card-face--back {
+				animation: none;
+			}
+			.quiz-card-stage--revealed .quiz-card-fx::before {
+				animation: none;
+				opacity: 0.7;
+				transform: none;
+			}
+			.quiz-card-stage--revealed .quiz-card-eq-bar {
+				animation: none;
+				transform: scaleY(0.52);
+			}
+			.quiz-card-stage--revealed .quiz-card-back-title:not(:empty) {
+				animation: none;
+				opacity: 1;
+				transform: none;
+				color: #fef3c7;
+				-webkit-text-fill-color: #fef3c7;
+				background: none;
+				-webkit-background-clip: border-box;
+				background-clip: border-box;
+			}
+			.quiz-card-stage--revealed .quiz-card-back-artist:not(:empty) {
+				animation: none;
+				opacity: 1;
+				transform: none;
+			}
+		}
+
 	</style>
 </head>
 <body>
 	<div class="app-layout">
 		<div class="panel">
-			<h1>Quiz muzyczny</h1>
-			<p class="me" id="meInfo"></p>
-			<div id="revealPanel" class="reveal-panel hidden"></div>
-
-			<div id="adminRoundLimitRow" class="section hidden">
-				<label for="quizRoundLimitInput">Limit utworów w sesji (0 = bez limitu)</label>
-				<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:6px;">
-					<input id="quizRoundLimitInput" type="number" min="0" max="9999" step="1" value="0" />
-					<button id="saveRoundLimitBtn" type="button" class="main">Zapisz limit</button>
-				</div>
-				<p id="quizRoundLimitHint" style="margin:8px 0 0;font-size:13px;color:#94a3b8;"></p>
+			<div id="adminUiPeekBar" class="admin-ui-peek-bar hidden">
+				<label class="admin-ui-peek-label">
+					<input type="checkbox" id="adminUiHideTopCheckbox" />
+					Ukryj naglowek i panel sterowania (tytul, limit, przyciski)
+				</label>
 			</div>
-			<div id="adminRoundControls" class="phase-actions hidden">
-				<button id="startRoundBtn">Start</button>
-				<button id="nextPhaseBtn">Nastepna faza</button>
-				<button id="autoToggleBtn">Auto: ON</button>
-				<button id="stopClipBtn">Stop klipu</button>
-				<button type="button" id="resetFullQuizBtn" title="Zeruje punkty, rundy i stan quizu (gdy cos sie zawiesi)">Reset calego quizu</button>
-			</div>
+			<div id="adminUiTopSection" class="admin-ui-top-section">
+				<h1>Quiz muzyczny</h1>
+				<p class="me" id="meInfo"></p>
 
-			<div class="section">
-				<div id="quizProgressWrap" class="quiz-progress-wrap">
-					<span class="quiz-progress-label">Postep klipu</span>
-					<div class="quiz-progress-track" aria-hidden="true">
-						<div id="quizProgressFill" class="quiz-progress-fill"></div>
+				<div id="adminRoundLimitRow" class="section hidden">
+					<label for="quizRoundLimitInput">Limit utworów w sesji (0 = bez limitu)</label>
+					<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:6px;">
+						<input id="quizRoundLimitInput" type="number" min="0" max="9999" step="1" value="0" />
+						<button id="saveRoundLimitBtn" type="button" class="main">Zapisz limit</button>
 					</div>
+					<p id="quizRoundLimitHint" style="margin:8px 0 0;font-size:13px;color:#94a3b8;"></p>
 				</div>
-				<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;">
-					<span>Glosnosc</span>
-					<input id="volumeRange" type="range" min="0" max="100" step="1" value="25" />
-					<span id="volumeLabel">25%</span>
+				<div id="adminRoundControls" class="phase-actions hidden">
+					<button id="startRoundBtn">Start</button>
+					<button id="nextPhaseBtn">Nastepna faza</button>
+					<button id="autoToggleBtn">Auto: ON</button>
+					<button id="stopClipBtn">Stop klipu</button>
+					<button type="button" id="resetFullQuizBtn" title="Zeruje punkty, rundy i stan quizu (gdy cos sie zawiesi)">Reset calego quizu</button>
 				</div>
 			</div>
 
-			<p id="quizLimitBanner" class="quiz-phase-badge hidden" style="color:#fbbf24;" aria-live="polite"></p>
-			<p id="quizPhaseBadge" class="quiz-phase-badge hidden" aria-live="polite"></p>
-			<div class="guess-autocomplete-wrap">
-				<form id="guessForm" class="guess-form" action="#" method="post">
-					<div class="guess-row guess-row--with-skip">
-						<input id="guessInput" class="guess-input-main" name="guess" type="text" placeholder="Artysta - tytul (Enter)" autocomplete="off" disabled />
+			<div class="quiz-card-layout">
+				<div class="quiz-card-row">
+					<div class="quiz-card-side-actions" aria-label="Akcje karty">
 						<button type="button" id="skipPhaseBtn" class="skip-phase-btn" disabled>
 							SKIP
 						</button>
@@ -678,8 +1215,62 @@
 							Ponów
 						</button>
 					</div>
-				</form>
-				<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
+					<div class="quiz-card-main-col">
+						<div id="quizCardStage" class="quiz-card-stage">
+							<div class="quiz-card-float">
+								<div class="quiz-card-inner" id="quizCardInner">
+									<div class="quiz-card-face quiz-card-face--front">
+										<img class="quiz-card-img" src="photo/card.png" alt="" width="640" height="640" decoding="async" />
+									</div>
+									<div class="quiz-card-face quiz-card-face--back" aria-live="polite">
+										<div class="quiz-card-back-vignette" aria-hidden="true"></div>
+										<div class="quiz-card-fx" aria-hidden="true">
+											<div class="quiz-card-eq">
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+												<span class="quiz-card-eq-bar"></span>
+											</div>
+										</div>
+										<div class="quiz-card-back-copy">
+											<div id="quizCardBackTitle" class="quiz-card-back-title"></div>
+											<div id="quizCardBackArtist" class="quiz-card-back-artist"></div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+						<div class="quiz-card-progress-section section">
+							<div id="quizProgressWrap" class="quiz-progress-wrap">
+								<span class="quiz-progress-label">Postep klipu</span>
+								<div class="quiz-progress-track" aria-hidden="true">
+									<div id="quizProgressFill" class="quiz-progress-fill"></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="quiz-card-volume-rail">
+						<span class="quiz-card-volume-cap">Glosnosc</span>
+						<div class="quiz-card-volume-spin">
+							<input id="volumeRange" class="quiz-card-volume-input-vertical" type="range" min="0" max="100" step="1" value="25" aria-label="Glosnosc" />
+						</div>
+						<span id="volumeLabel" class="quiz-card-volume-val">25%</span>
+					</div>
+				</div>
+				<div class="quiz-card-guess-slot">
+					<p id="quizLimitBanner" class="quiz-phase-badge hidden" style="color:#fbbf24;" aria-live="polite"></p>
+					<div class="guess-autocomplete-wrap">
+						<form id="guessForm" class="guess-form" action="#" method="post">
+							<div class="guess-row">
+								<input id="guessInput" class="guess-input-main" name="guess" type="text" placeholder="Artysta - tytul (Enter)" autocomplete="off" disabled />
+							</div>
+						</form>
+						<ul id="guessSuggestList" class="guess-suggest hidden"></ul>
+					</div>
+				</div>
 			</div>
 			<p id="result" class="result"></p>
 			<div id="wrongGuessPanel" class="wrong-guess-panel hidden" aria-live="polite"></div>
@@ -715,7 +1306,12 @@
 		const AUTO_PHASE_DELAY_MS = 700;
 		const QUIZ_MAX_SKIPS = 4;
 		const meInfo = document.getElementById("meInfo");
-		const revealPanel = document.getElementById("revealPanel");
+		const adminUiPeekBar = document.getElementById("adminUiPeekBar");
+		const adminUiTopSection = document.getElementById("adminUiTopSection");
+		const adminUiHideTopCheckbox = document.getElementById("adminUiHideTopCheckbox");
+		const quizCardStage = document.getElementById("quizCardStage");
+		const quizCardBackTitle = document.getElementById("quizCardBackTitle");
+		const quizCardBackArtist = document.getElementById("quizCardBackArtist");
 		const adminRoundControls = document.getElementById("adminRoundControls");
 		const adminRoundLimitRow = document.getElementById("adminRoundLimitRow");
 		const quizRoundLimitInput = document.getElementById("quizRoundLimitInput");
@@ -735,7 +1331,6 @@
 		const guessInput = document.getElementById("guessInput");
 		const skipPhaseBtn = document.getElementById("skipPhaseBtn");
 		const replayListenBtn = document.getElementById("replayListenBtn");
-		const quizPhaseBadge = document.getElementById("quizPhaseBadge");
 		const guessSuggestList = document.getElementById("guessSuggestList");
 		const result = document.getElementById("result");
 		const guessHistoryPanel = document.getElementById("guessHistoryPanel");
@@ -782,6 +1377,7 @@
 		let quizEndOverlayDismissed = false;
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
+		function getAdminTopHiddenStorageKey() { return getStorageKey("quiz_admin_top_hidden"); }
 		function isValidPlayer(player) { return Number.isInteger(player) && player >= 1 && player <= MAX_PLAYERS; }
 		function safeName(value, fallbackPlayer) {
 			const text = String(value || "").trim();
@@ -818,6 +1414,21 @@
 			}
 		}
 		function isAdmin() { return normalizeName(myName) === VIDEO_CONTROLLER_NAME; }
+		function syncAdminTopCollapseUi() {
+			if (!adminUiPeekBar || !adminUiTopSection || !adminUiHideTopCheckbox) {
+				return;
+			}
+			if (!isAdmin()) {
+				adminUiPeekBar.classList.add("hidden");
+				adminUiTopSection.classList.remove("hidden");
+				return;
+			}
+			adminUiPeekBar.classList.remove("hidden");
+			const stored = localStorage.getItem(getAdminTopHiddenStorageKey());
+			const hide = stored === "1";
+			adminUiHideTopCheckbox.checked = hide;
+			adminUiTopSection.classList.toggle("hidden", hide);
+		}
 		function setStatus(text) { statusEl.textContent = "Status: " + text; }
 		function toIntScore(value) { const n = Number(value); return Number.isFinite(n) ? Math.trunc(n) : 0; }
 		function clampVolume(value) { const n = Number(value); if (!Number.isFinite(n)) { return 25; } return Math.max(0, Math.min(100, Math.round(n))); }
@@ -828,6 +1439,7 @@
 			adminRoundLimitRow.classList.toggle("hidden", !isAdmin());
 			adminRoundControls.classList.toggle("hidden", !isAdmin());
 			autoToggleBtn.textContent = autoAdvanceEnabled ? "Auto: ON" : "Auto: OFF";
+			syncAdminTopCollapseUi();
 		}
 
 		async function saveRoundLimit() {
@@ -1513,23 +2125,21 @@
 				const ans = String(state.quizTrackLabel || "").trim();
 				const art = String(state.quizTrackArtist || "").trim();
 				const tit = String(state.quizTrackTitle || "").trim();
-				let html = "";
 				if (tit || art) {
-					html =
-						(tit ? '<div class="reveal-title-line">' + escapeHtml(tit) + "</div>" : "") +
-						(art ? '<div class="reveal-artist-line">' + escapeHtml(art) + "</div>" : "");
+					quizCardBackTitle.textContent = tit || "";
+					quizCardBackArtist.textContent = art || "";
 				} else if (ans) {
-					html = '<div class="reveal-title-line">' + escapeHtml(ans) + "</div>";
+					quizCardBackTitle.textContent = ans;
+					quizCardBackArtist.textContent = "";
 				} else {
-					html = "";
+					quizCardBackTitle.textContent = "";
+					quizCardBackArtist.textContent = "";
 				}
-				revealPanel.innerHTML = html;
-				revealPanel.classList.remove("reveal-chorus");
-				revealPanel.classList.remove("hidden");
+				quizCardStage.classList.add("quiz-card-stage--revealed");
 			} else {
-				revealPanel.innerHTML = "";
-				revealPanel.classList.remove("reveal-chorus");
-				revealPanel.classList.add("hidden");
+				quizCardBackTitle.textContent = "";
+				quizCardBackArtist.textContent = "";
+				quizCardStage.classList.remove("quiz-card-stage--revealed");
 			}
 			const roundOn = Boolean(state.quizRoundActive);
 			const exhausted = Boolean(state.quizRoundsExhausted);
@@ -1561,33 +2171,6 @@
 			guessInput.disabled = isPlayerGuessed(myPlayer) || myWrong || !roundOn || revealOn;
 			skipPhaseBtn.disabled = guessInput.disabled || skipsUsedEarly >= QUIZ_MAX_SKIPS;
 			replayListenBtn.disabled = !roundOn || revealOn || isPlayerGuessed(myPlayer) || myWrong;
-			const dursBadge = Array.isArray(state.quizPhaseDurations) ? state.quizPhaseDurations : [0.5, 2, 4, 6];
-			const ptsBadge = Array.isArray(state.quizPhasePoints) ? state.quizPhasePoints : [4, 3, 2, 1];
-			const lpMapB = state.quizListenPhases || {};
-			let idxB = Number(lpMapB[String(myPlayer)]);
-			if (!Number.isFinite(idxB)) {
-				idxB = 0;
-			}
-			idxB = Math.max(0, Math.min(Math.floor(idxB), dursBadge.length - 1));
-			const secB = Number(dursBadge[idxB]);
-			const ptB = ptsBadge[idxB] !== undefined ? ptsBadge[idxB] : 4;
-			const skipsUsed = skipsUsedEarly;
-			if (roundOn && !revealOn && !myWrong && !isPlayerGuessed(myPlayer) && Number.isFinite(secB)) {
-				quizPhaseBadge.textContent =
-					"Faza " +
-					String(idxB + 1) +
-					"/4 · " +
-					String(ptB) +
-					" pkt przy trafieniu (0 jesli nietrafione) · do " +
-					String(secB) +
-					" s sluchu · skip " +
-					String(skipsUsed) +
-					"/4";
-				quizPhaseBadge.classList.remove("hidden");
-			} else {
-				quizPhaseBadge.textContent = "";
-				quizPhaseBadge.classList.add("hidden");
-			}
 			if (myWrong && roundOn) {
 				wrongGuessPanel.classList.remove("hidden");
 				wrongGuessPanel.innerHTML = "";
@@ -1784,6 +2367,14 @@
 			}
 		}
 
+		adminUiHideTopCheckbox.addEventListener("change", () => {
+			if (!isAdmin()) {
+				return;
+			}
+			const hide = adminUiHideTopCheckbox.checked;
+			localStorage.setItem(getAdminTopHiddenStorageKey(), hide ? "1" : "0");
+			adminUiTopSection.classList.toggle("hidden", hide);
+		});
 		saveRoundLimitBtn.addEventListener("click", saveRoundLimit);
 		startRoundBtn.addEventListener("click", startQuizRound);
 		resetFullQuizBtn.addEventListener("click", resetFullQuizSession);
