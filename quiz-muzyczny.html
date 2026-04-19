@@ -991,7 +991,7 @@
 			margin: 0;
 			perspective: 1200px;
 			perspective-origin: 50% 42%;
-			transition: perspective 0.22s ease;
+			transition: perspective 0.12s ease;
 		}
 
 		/* Po odkryciu węższa perspektywa = wyraźniejsze zbliżanie / oddalanie w 3D */
@@ -1043,13 +1043,14 @@
 			width: min(320px, 78vw);
 			transform-style: preserve-3d;
 			-webkit-transform-style: preserve-3d;
-			transition: transform 0.22s cubic-bezier(0.25, 0.1, 0.25, 1);
+			transition: transform 0.12s cubic-bezier(0.25, 0.1, 0.25, 1);
 			border-radius: 16px;
 			box-shadow: 0 22px 44px rgba(0, 0, 0, 0.48);
 		}
 
 		.quiz-card-inner.quiz-card-inner--instant {
 			transition: none !important;
+			transform: rotateY(0deg) translateZ(6px) !important;
 		}
 
 		.quiz-card-stage.quiz-card-stage--instant {
@@ -1642,6 +1643,7 @@
 		let phaseAnswerEndAtMs = 0;
 		let phaseAnswerSnapCmd = -1;
 		let phaseAnswerSnapLt = -1;
+		let quizClipLocalStartMs = 0; // Start biezacego klipu u klienta — auto-SKIP liczony od tego (poll dogania brak setTimeout).
 
 		function getStorageKey(prefix) { return "buzzer_" + prefix; }
 		function getAdminTopHiddenStorageKey() { return getStorageKey("quiz_admin_top_hidden"); }
@@ -2319,13 +2321,21 @@
 			if (su0 >= QUIZ_MAX_SKIPS) {
 				return;
 			}
+			const durSec = resolveQuizListenDurationForMe(stateSnap);
+			if (quizClipLocalStartMs > 0 && durSec <= 0) {
+				return;
+			}
+			const clipEndMs =
+				quizClipLocalStartMs > 0 ? quizClipLocalStartMs + durSec * 1000 : Date.now();
+			const answerEndMs = clipEndMs + QUIZ_PHASE_ANSWER_MS;
+			const delayMs = Math.max(0, answerEndMs - Date.now());
 			phaseAnswerSnapCmd = Number(stateSnap.quizCommandToken || 0);
 			phaseAnswerSnapLt = Number(
 				(stateSnap.quizListenTokens || {})[String(myPlayer)] != null
 					? (stateSnap.quizListenTokens || {})[String(myPlayer)]
 					: 0
 			);
-			phaseAnswerEndAtMs = Date.now() + QUIZ_PHASE_ANSWER_MS;
+			phaseAnswerEndAtMs = answerEndMs;
 			if (phaseAnswerTimerWrap) {
 				phaseAnswerTimerWrap.classList.remove("hidden");
 			}
@@ -2365,10 +2375,52 @@
 					return;
 				}
 				skipPhase();
-			}, QUIZ_PHASE_ANSWER_MS);
+			}, delayMs);
+		}
+
+		// Najwazniejsze: kazdy klient (poll) odtwarza auto-SKIP gdy timer po koncu klipu nie zadzialal (throttling, autoplay).
+		function ensurePhaseAnswerDeadlineFromLocalClip(state) {
+			if (!state || !myPlayer) {
+				return;
+			}
+			if (!Boolean(state.quizRoundActive) || Boolean(state.quizRevealActive)) {
+				return;
+			}
+			if (isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
+				return;
+			}
+			if (resolveListenOnLastChance(state, myPlayer)) {
+				return;
+			}
+			const skMap0 = state.quizSkipsUsed || {};
+			if (Number(skMap0[String(myPlayer)] != null ? skMap0[String(myPlayer)] : 0) >= QUIZ_MAX_SKIPS) {
+				return;
+			}
+			if (quizClipLocalStartMs <= 0) {
+				return;
+			}
+			const durSec = resolveQuizListenDurationForMe(state);
+			if (durSec <= 0) {
+				return;
+			}
+			const clipEndMs = quizClipLocalStartMs + durSec * 1000;
+			const answerEndMs = clipEndMs + QUIZ_PHASE_ANSWER_MS;
+			const now = Date.now();
+			if (now < clipEndMs) {
+				return;
+			}
+			if (phaseAnswerDeadlineTimer) {
+				return;
+			}
+			if (now >= answerEndMs) {
+				skipPhase();
+				return;
+			}
+			maybeSchedulePhaseAnswerDeadline(state);
 		}
 
 		function stopCurrentClip() {
+			quizClipLocalStartMs = 0;
 			clearPhaseAnswerDeadline();
 			if (clipStopTimer) {
 				clearTimeout(clipStopTimer);
@@ -2687,6 +2739,7 @@
 				if (clipStopTimer) {
 					clearTimeout(clipStopTimer);
 				}
+				quizClipLocalStartMs = Date.now();
 				clipStopTimer = setTimeout(function () {
 					stopCurrentClip();
 					if (!reveal) {
@@ -2731,6 +2784,7 @@
 					await quizAudio.play();
 					startClipProgressRevealBar(0, durationSec);
 				}
+				quizClipLocalStartMs = Date.now();
 				clipStopTimer = setTimeout(function () {
 					stopCurrentClip();
 					if (!reveal) {
@@ -2839,9 +2893,11 @@
 			const revealOn = Boolean(state.quizRevealActive);
 			const roundOn = Boolean(state.quizRoundActive);
 			const tokenPre = Number(state.quizCommandToken || 0);
+			const domRevealBefore =
+				quizCardStage && quizCardStage.classList.contains("quiz-card-stage--revealed");
 			let instantRevealToRound = false;
 			if (
-				prevRevealForCard &&
+				(prevRevealForCard || domRevealBefore) &&
 				!revealOn &&
 				roundOn &&
 				tokenPre > lastQuizCommandToken
@@ -2976,6 +3032,15 @@
 			if (revealOn || !roundOn || isPlayerGuessed(myPlayer) || isQuizWrong(myPlayer)) {
 				clearPhaseAnswerDeadline();
 			}
+			if (
+				Boolean(state.quizRoundActive) &&
+				!Boolean(state.quizRevealActive) &&
+				myPlayer &&
+				!isPlayerGuessed(myPlayer) &&
+				!isQuizWrong(myPlayer)
+			) {
+				ensurePhaseAnswerDeadlineFromLocalClip(state);
+			}
 			if (instantRevealToRound) {
 				window.setTimeout(function () {
 					if (quizCardInner) {
@@ -2984,7 +3049,7 @@
 					if (quizCardStage) {
 						quizCardStage.classList.remove("quiz-card-stage--instant");
 					}
-				}, 60);
+				}, 30);
 			}
 			lastQuizRevealActiveForUi = revealOn;
 		}
