@@ -205,6 +205,7 @@ POLISH_SCENE_ARTIST_SEEDS = (
 	"Guzior",
 	"Dajczman",
 )
+# Najważniejsze: długości kolejnych tierów zgadywania (zawsze od początku preview po stronie klienta — intro/bit, potem więcej od startu).
 QUIZ_PHASE_DURATIONS = [0.5, 2, 4, 6]
 QUIZ_PHASE_POINTS = [4, 3, 2, 1]
 QUIZ_REVEAL_CLIP_SEC = 10
