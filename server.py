@@ -206,7 +206,11 @@ POLISH_SCENE_ARTIST_SEEDS = (
 	"Dajczman",
 )
 # Najważniejsze: długości kolejnych tierów zgadywania (zawsze od początku preview po stronie klienta — intro/bit, potem więcej od startu).
-QUIZ_PHASE_DURATIONS = [0.5, 2, 4, 6]
+# Testowo: krótsze klipy — mniej czasu na szukanie w internecie / Shazam (ustaw False, żeby wrócić do standardu).
+QUIZ_TIME_PRESSURE_TEST = True
+QUIZ_PHASE_DURATIONS = (
+	[0.4, 0.95, 1.5, 2.4] if QUIZ_TIME_PRESSURE_TEST else [0.5, 2, 4, 6]
+)
 QUIZ_PHASE_POINTS = [4, 3, 2, 1]
 QUIZ_REVEAL_CLIP_SEC = 10
 QUIZ_AFTER_REVEAL_NEXT_SEC = 1.0
